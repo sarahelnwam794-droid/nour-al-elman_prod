@@ -7,13 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'student/student_home_screen.dart';
 import 'teacher/teacher_home_screen.dart';
 import 'employee/employee_home_screen.dart';
-import 'account_selection_dialog.dart'; // ← المسار حسب مشروعك
+import 'account_selection_dialog.dart';
+
 final Color primaryOrange = Color(0xFFC66422);
 final Color darkBlue = Color(0xFF2E3542);
 final Color greyText = Color(0xFF707070);
 final Color successGreen = Color(0xFF2D8A63);
 
-const String baseUrl = 'https://nour-al-eman.runasp.net/api';
+const String baseUrl = 'https://nourelman.runasp.net/api';
 
 var logger = Logger();
 
@@ -32,13 +33,11 @@ void main() async {
       final int userType = int.tryParse(responseData['userType']?.toString() ?? "0") ?? 0;
 
       if (userType == 1 || userType == 4) {
-        // معلم/معلمة
         initialScreen = TeacherHomeScreen();
       } else if (userType == 2 || userType == 3) {
-        // إدارة أو محاسب
         initialScreen = EmployeeHomeScreen();
       } else {
-        // طالب أو غير معروف
+
         initialScreen = StudentHomeScreen(loginData: responseData);
       }
     } catch (e) {
@@ -117,6 +116,151 @@ class SuccessScreen extends StatelessWidget {
   }
 }
 
+class PendingApprovalScreen extends StatefulWidget {
+  final String phone;
+  final String password;
+  final String userId;
+  const PendingApprovalScreen({
+    required this.phone,
+    required this.password,
+    this.userId = "",
+  });
+
+  @override
+  _PendingApprovalScreenState createState() => _PendingApprovalScreenState();
+}
+
+class _PendingApprovalScreenState extends State<PendingApprovalScreen> {
+
+  @override
+  void initState() {
+    super.initState();
+    _startPolling();
+  }
+
+  void _startPolling() async {
+    while (mounted) {
+      await Future.delayed(Duration(seconds: 10));
+      if (!mounted) return;
+      await _checkIfApproved();
+    }
+  }
+
+  Future<void> _checkIfApproved() async {
+    try {
+      debugPrint(" POLLING: phone=${widget.phone}, userId=${widget.userId}");
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/Account/UserLogin'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "Phone": widget.phone,
+          "Password": widget.password,
+          "UserId": widget.userId,
+        }),
+      );
+
+      debugPrint("⏳ POLL_RESPONSE: status=${response.statusCode} | body=${response.body}");
+
+      if (response.statusCode == 200 && mounted) {
+        final dynamic decodedBody = jsonDecode(response.body);
+        Widget nextScreen;
+
+        if (decodedBody is Map<String, dynamic>) {
+          final int userType = int.tryParse(decodedBody['userType']?.toString() ?? "0") ?? 0;
+          debugPrint(" APPROVED! userType=$userType");
+          if (userType == 1 || userType == 4) {
+            nextScreen = TeacherHomeScreen();
+          } else if (userType == 2 || userType == 3) {
+            nextScreen = EmployeeHomeScreen();
+          } else {
+            nextScreen = StudentHomeScreen(loginData: decodedBody);
+          }
+        } else if (decodedBody is List && decodedBody.isNotEmpty) {
+          final first = Map<String, dynamic>.from(decodedBody[0]);
+          final int userType = int.tryParse(first['userType']?.toString() ?? "0") ?? 0;
+          if (userType == 1 || userType == 4) {
+            nextScreen = TeacherHomeScreen();
+          } else if (userType == 2 || userType == 3) {
+            nextScreen = EmployeeHomeScreen();
+          } else {
+            nextScreen = StudentHomeScreen(loginData: first);
+          }
+        } else {
+          return;
+        }
+
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => nextScreen),
+              (route) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint(" POLL_ERROR: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 110,
+                    height: 110,
+                    decoration: BoxDecoration(
+                      color: successGreen.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.hourglass_top_rounded, size: 56, color: successGreen),
+                  ),
+                  SizedBox(height: 28),
+                  Text(
+                    'في انتظار الموافقة',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: successGreen),
+                    textAlign: TextAlign.center,
+                  ),
+                  SizedBox(height: 16),
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: successGreen.withOpacity(0.07),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: successGreen.withOpacity(0.3), width: 1.2),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline_rounded, color: successGreen, size: 20),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'رجاء الانتظار حتى يقوم المشرف بالموافقة على الحساب',
+                            style: TextStyle(fontSize: 15, color: successGreen, fontWeight: FontWeight.w600, height: 1.5),
+                            textAlign: TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class LoginScreen extends StatefulWidget {
   @override
   _LoginScreenState createState() => _LoginScreenState();
@@ -135,18 +279,17 @@ class _LoginScreenState extends State<LoginScreen> {
       try {
         final String phone = _phoneController.text.trim();
         final String password = _passwordController.text;
-
         final response = await http.post(
           Uri.parse('$baseUrl/Account/ValidateUserLogin'),
           headers: {"Content-Type": "application/json"},
           body: jsonEncode({
-            "Phone": phone,
-            "Password": password,
-            "UserId": ""
+            "phone": phone,
+            "password": password,
+            "userId": ""
           }),
         );
 
-        debugPrint("SERVER_RESPONSE: ${response.body}");
+        debugPrint("🔐 VALIDATE_LOGIN: status=${response.statusCode} | body=${response.body}");
 
         if (response.statusCode == 200) {
           final dynamic decodedBody = jsonDecode(response.body);
@@ -158,66 +301,77 @@ class _LoginScreenState extends State<LoginScreen> {
               return;
             }
 
-            // دالة مساعدة للتعامل مع الأكونت المختار
             Future<void> handleSelectedAccount(Map<String, dynamic> selected) async {
               final int selUserType = int.tryParse(selected['userType']?.toString() ?? "0") ?? 0;
               final String selUserId = selected['id']?.toString() ?? "";
+              debugPrint("🎯 handleSelectedAccount: userType=$selUserType, userId=$selUserId");
 
-              if (selUserType == 0) {
-                // الحل: UserLogin بالـ GUID عشان السيرفر يرجع id رقمي خاص بالأكونت
-                try {
-                  final userLoginResponse = await http.post(
-                    Uri.parse('$baseUrl/Account/UserLogin'),
-                    headers: {"Content-Type": "application/json"},
-                    body: jsonEncode({
-                      "Phone": phone,
-                      "Password": password,
-                      "UserId": selUserId,
-                    }),
-                  );
+              try {
+                final userLoginResponse = await http.post(
+                  Uri.parse('$baseUrl/Account/UserLogin'),
+                  headers: {"Content-Type": "application/json"},
+                  body: jsonEncode({
+                    "Phone": phone,
+                    "Password": password,
+                    "UserId": selUserId,
+                  }),
+                );
 
-                  debugPrint("USER_LOGIN_RESPONSE: ${userLoginResponse.body}");
+                debugPrint(" USER_LOGIN_RESPONSE: status=${userLoginResponse.statusCode} | body=${userLoginResponse.body}");
 
-                  if (userLoginResponse.statusCode == 200) {
-                    final dynamic decoded = jsonDecode(userLoginResponse.body);
-                    if (decoded is Map<String, dynamic>) {
-                      await _loginWithAccount(decoded);
+                if (userLoginResponse.statusCode == 200) {
+                  final dynamic decoded = jsonDecode(userLoginResponse.body);
+                  if (decoded is Map<String, dynamic>) {
+                    await _loginWithAccount(decoded);
+                    return;
+                  }
+                  if (decoded is List && decoded.isNotEmpty) {
+                    await _loginWithAccount(Map<String, dynamic>.from(decoded[0]));
+                    return;
+                  }
+                }
+                if (userLoginResponse.statusCode == 401) {
+                  try {
+                    final errBody = jsonDecode(userLoginResponse.body);
+                    debugPrint(" 401 message: ${errBody['message']}");
+                    if (errBody['message']?.toString() == 'Waiting for Approve') {
+                      if (mounted) {
+                        setState(() => _isLoading = false);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => PendingApprovalScreen(
+                              phone: phone,
+                              password: password,
+                              userId: selUserId,
+                            ),
+                          ),
+                        );
+                      }
                       return;
                     }
+                  } catch (_) {}
+                  if (mounted) {
+                    setState(() => _isLoading = false);
+                    _showErrorSnackBar("رقم الهاتف أو كلمة المرور غير صحيحة");
                   }
-                } catch (e) {
-                  debugPrint("UserLogin error: $e");
+                  return;
                 }
-
-                // fallback لو فشل
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setString('user_guid', selUserId);
-                await prefs.setString('user_phone', phone);
-                final studentData = Map<String, dynamic>.from(selected);
-                studentData['phoneNumber'] = phone;
-                await prefs.setString('loginData', jsonEncode(studentData));
-
-                await prefs.setBool('is_logged_in', true);
                 if (mounted) {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => StudentHomeScreen(loginData: studentData)),
-                  );
+                  setState(() => _isLoading = false);
+                  _showErrorSnackBar("حدث خطأ غير متوقع، حاول مرة أخرى");
                 }
-              } else {
-                // موظف/معلم → محتاج numeric ID من GetAll
-                await _loginWithSelectedAccount(
-                  phone: phone,
-                  password: password,
-                  userId: selUserId,
-                  userType: selUserType,
-                );
+              } catch (e) {
+                debugPrint(" handleSelectedAccount error: $e");
+                if (mounted) {
+                  setState(() => _isLoading = false);
+                  _showErrorSnackBar("حدث خطأ في الاتصال بالسيرفر");
+                }
               }
             }
 
             if (decodedBody.length == 1) {
               await handleSelectedAccount(Map<String, dynamic>.from(decodedBody[0]));
             } else {
-              // أكتر من أكونت → عرض الداياليوق
               setState(() => _isLoading = false);
               if (!mounted) return;
               showGeneralDialog(
@@ -240,6 +394,31 @@ class _LoginScreenState extends State<LoginScreen> {
             await _loginWithAccount(Map<String, dynamic>.from(decodedBody));
           }
         } else {
+          // ValidateUserLogin رجع error
+          debugPrint("🔴 VALIDATE_LOGIN FAILED: status=${response.statusCode} | body=${response.body}");
+          if (response.statusCode == 401) {
+            try {
+              final body = jsonDecode(response.body);
+              final msg = body['message']?.toString().trim() ?? "";
+              debugPrint("🔴 401 msg: $msg");
+              if (msg == 'Waiting for Approve') {
+                // أكونت واحد pending → روح شاشة الانتظار
+                setState(() => _isLoading = false);
+                if (mounted) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => PendingApprovalScreen(
+                      phone: _phoneController.text.trim(),
+                      password: _passwordController.text,
+                      userId: "",
+                    )),
+                  );
+                }
+                return;
+              }
+            } catch (e) {
+              debugPrint("❌ parse error: $e");
+            }
+          }
           _showErrorSnackBar("رقم الهاتف أو كلمة المرور غير صحيحة");
         }
       } catch (e) {
@@ -293,9 +472,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
       debugPrint("🔍 جاري البحث عن numeric ID من Employee/Getall...");
 
-      // الخطوة 1: جيب كل الموظفين/المعلمين
+      // userType=2 أو 3 → type=2, userType=1 أو 4 → type=1
+      final empType = (userType == 1 || userType == 4) ? 1 : 2;
       final allResponse = await http.get(
-        Uri.parse('$baseUrl/Employee/Getall'),
+        Uri.parse('$baseUrl/Employee/GetWithType?type=$empType'),
       );
 
       if (allResponse.statusCode != 200) {
@@ -304,7 +484,7 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       final allData = jsonDecode(allResponse.body);
-      final List employees = allData['data'] ?? [];
+      final List employees = allData is List ? allData : (allData['data'] ?? []);
 
       // الخطوة 2: لاقي الموظف اللي phone وemployeeTypeId بتاعه مطابقين
       Map<String, dynamic>? matched;
@@ -611,8 +791,6 @@ Future<void> _handleRegistration({
     logger.v("API_RESPONSE: Code ${response.statusCode} | Body: ${response.body}");
 
     if (response.statusCode == 200 || response.statusCode == 201) {
-      // تعديل هام: لا نقوم بحفظ البيانات هنا ولا نقوم بعمل Login تلقائي بالـ GUID
-      // فقط ننتقل لصفحة النجاح، ومنها المستخدم يعود للـ Login
       Navigator.push(context, MaterialPageRoute(builder: (context) => SuccessScreen()));
 
     } else {
@@ -620,10 +798,18 @@ Future<void> _handleRegistration({
       String displayError = "فشل التسجيل: تفقد البيانات المدخلة";
       try {
         var body = jsonDecode(response.body);
-        if (body['message'] != null) {
+        String rawError = body['error']?.toString() ?? "";
+
+        if (rawError.contains('IX_Employees_Ssn') || rawError.contains('Ssn') || rawError.contains('duplicate key')) {
+          displayError = "الرقم القومي مسجل مسبقاً، تحقق من البيانات";
+        } else if (rawError.contains('phone') || rawError.contains('Phone')) {
+          displayError = "رقم الهاتف مسجل مسبقاً";
+        } else if (rawError.contains('email') || rawError.contains('Email')) {
+          displayError = "البريد الإلكتروني مسجل مسبقاً";
+        } else if (body['message'] != null) {
           displayError = body['message'].toString();
         }
-      } catch(_) {}
+      } catch (_) {}
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(displayError), backgroundColor: Colors.red),
@@ -663,16 +849,50 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
 
   String? _selectedLocation;
   String? _selectedAttendance;
+  List<dynamic> _locations = [];
+  bool _isLoadingLocations = true;
+  int? _selectedLocId;
+// متغيرات المكاتب الجديدة
+  List<dynamic> _offices = [];
+  bool _isLoadingOffices = true;
+  @override
+  void initState() {
+    super.initState();
+    _fetchLocations();
+    _fetchOffices();
+  }
+  Future<void> _fetchOffices() async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://nourelman.runasp.net/api/Location/GetAll'),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _offices = data; // السيرفر بيرجع قائمة مباشرة
+          _isLoadingOffices = false;
+        });
+      }
+    } catch (e) {
+      print("Error fetching offices: $e");
+      setState(() => _isLoadingOffices = false);
+    }
+  }
+  Future<void> _fetchLocations() async {
+    try {
+      final response = await http.get(Uri.parse('https://nourelman.runasp.net/api/Locations/GetAll'));
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        setState(() {
+          _locations = decoded is List ? decoded : (decoded['data'] ?? []);
+          _isLoadingLocations = false;
+        });
+      }
+    } catch (e) {
+      setState(() => _isLoadingLocations = false);
+    }
+  }
 
-  final Map<String, int> locationMap = {
-    "مدرسة نور الإيمان": 1,
-    "rouby's location": 2,
-    "مسجد الشيخ ابراهيم": 3,
-    "مسجد العباسي": 4,
-    "مسجد الهدى والنور": 5,
-    "مضيفة نافع": 6,
-    "مكتب الموقف": 7,
-  };
   void _registerStudent() async {
     if (_formKey.currentState!.validate()) {
       if (_passwordController.text != _confirmPasswordController.text) {
@@ -686,22 +906,23 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
 
       String birthDate = "${_yearController.text}-${_monthController.text.padLeft(2, '0')}-${_dayController.text.padLeft(2, '0')}T00:00:00.000Z";
 
+
       Map<String, dynamic> studentData = {
         "name": _nameController.text.trim(),
-        "phone": _phoneController.text.trim().isEmpty ? "00000000000" : _phoneController.text.trim(),
+        "Phone": _parentPhoneController.text.trim(), // ✅ رقم ولي الأمر (الأساسي)
+        "phone2": _phoneController.text.trim(),     // ✅ رقم الطالب (اختياري)
         "address": _addressController.text.trim(),
-        "ParentJob": _parentJobController.text.trim(),  // تغيير إلى ParentJob (حرف كبير)
-        "email": _emailController.text.trim(),
+        "ParentJob": _parentJobController.text.trim(),
+// تغيير null إلى ""
+        "email": _emailController.text.trim().isEmpty ? "" : _emailController.text.trim(),
         "governmentSchool": _schoolController.text.trim(),
         "attendanceType": _selectedAttendance ?? "أوفلاين",
         "birthDate": birthDate,
-        "locId": locationMap[_selectedLocation] ?? 1,
-        "phone2": _parentPhoneController.text.trim(),
+        "locId": _selectedLocId ?? 1,
         "ssn": "",
         "employeeTypeId": 0,  // 0 للطالب (ليس null، ليتم تصنيفه صحيحًا)
         "educationDegree": "",
-        "Password": _passwordController.text,  // تغيير إلى Password (حرف كبير)
-        // joinDate: DateTime.now().toIso8601String(),  // أضفه إذا لزم الأمر، لكن السيرفر ربما يضيفه تلقائيًا
+        "Password": _passwordController.text,
       };
 
       logger.i("SENDING STUDENT DATA: ${jsonEncode(studentData)}");
@@ -709,7 +930,6 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return _BaseRegistrationScreen(
@@ -721,13 +941,14 @@ class _StudentRegistrationScreenState extends State<StudentRegistrationScreen> {
       children: [
         _buildInputField("الإسم", "الإسم", controller: _nameController),
         _buildInputField("وظيفة الأب", "وظيفة الأب", isRequired: false, controller: _parentJobController),
-        _buildDropdownField("المكتب التابع له", locationMap.keys.toList(), onChanged: (val) => _selectedLocation = val),
+        _isLoadingLocations
+            ? const Center(child: CircularProgressIndicator())
+            : _buildLocationDropdown(_locations, _selectedLocId, (val) => setState(() => _selectedLocId = val)),
         _buildInputField("العنوان", "العنوان", controller: _addressController),
         _buildInputField("البريد الإلكتروني", "example@mail.com", isRequired: false, controller: _emailController),
         _buildBirthdayRow(dayCtrl: _dayController, monthCtrl: _monthController, yearCtrl: _yearController),
         _buildInputField("رقم هاتف ولي الأمر", "01xxxxxxxxx", isPhone: true, isRequired: true, controller: _parentPhoneController),
-        _buildInputField("رقم الهاتف (اختياري)", "01xxxxxxxxx", isPhone: true, isRequired: false, controller: _phoneController),
-        _buildInputField("اسم المدرسة الحكومية", "اسم المدرسة", controller: _schoolController),
+        _buildInputField("رقم الهاتف (اختياري)", "01xxxxxxxxx", isPhone: true, isRequired: false, controller: _phoneController),        _buildInputField("اسم المدرسة الحكومية", "اسم المدرسة", controller: _schoolController),
         _buildDropdownField("الحضور", ["أونلاين", "أوفلاين"], onChanged: (val) => _selectedAttendance = val),
         _buildInputField("كلمة السر", "كلمة السر", isPassword: true, isObscured: _isPasswordObscured, onToggle: () => setState(() => _isPasswordObscured = !_isPasswordObscured), controller: _passwordController),
         _buildInputField("تأكيد كلمة السر", "تأكيد كلمة السر", isPassword: true, isObscured: _isConfirmObscured, onToggle: () => setState(() => _isConfirmObscured = !_isConfirmObscured), controller: _confirmPasswordController),
@@ -746,6 +967,9 @@ class _EmployeeRegistrationScreenState extends State<EmployeeRegistrationScreen>
   bool _isPasswordObscured = true;
   bool _isConfirmObscured = true;
   bool _isLoading = false;
+  List<dynamic> _offices = [];
+  bool _isLoadingOffices = true;
+  String? _selectedOffice;
   List<PlatformFile>? _selectedFiles; // لتخزين الملفات المختارة
   String _fileNames = "لم يتم اختيار ملفات"; // نص يعرض أسماء الملفات
   final TextEditingController _nameController = TextEditingController();
@@ -758,23 +982,58 @@ class _EmployeeRegistrationScreenState extends State<EmployeeRegistrationScreen>
 
   String? _selectedJobTitle;
   String? _selectedLocation;
+  List<dynamic> _locations = [];
+  bool _isLoadingLocations = true;
+  int? _selectedLocId;
 
-  final Map<String, int> locationMap = {
-    "مدرسة نور الإيمان": 1,
-    "rouby's location": 2,
-    "مسجد الشيخ ابراهيم": 3,
-    "مسجد العباسي": 4,
-    "مسجد الهدى والنور": 5,
-    "مضيفة نافع": 6,
-    "مكتب الموقف": 7,
-  };
+  // متغيرات المسميات الوظيفية الديناميكية
+  List<dynamic> _jobTypes = [];
+  bool _isLoadingJobTypes = true;
+  int? _selectedJobTypeId;
 
-  final Map<String, int> jobTypeMap = {
-    "معلم/معلمة": 1,
-    "إدارة": 2,
-    "محاسب": 3,
-  };
+  @override
+  void initState() {
+    super.initState();
+    _fetchOffices();
+    _fetchJobTypes();
+  }
 
+  Future<void> _fetchOffices() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/Locations/Getall'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _offices = data is List ? data : (data['data'] ?? []);
+          _isLoadingOffices = false;
+        });
+      } else {
+        setState(() => _isLoadingOffices = false);
+      }
+    } catch (e) {
+      setState(() => _isLoadingOffices = false);
+    }
+  }
+
+  // جلب المسميات الوظيفية ديناميكياً من السيرفر
+  Future<void> _fetchJobTypes() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/EmployeeType/GetAll'),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          _jobTypes = data is List ? data : (data['data'] ?? []);
+          _isLoadingJobTypes = false;
+        });
+      } else {
+        setState(() => _isLoadingJobTypes = false);
+      }
+    } catch (e) {
+      setState(() => _isLoadingJobTypes = false);
+    }
+  }
 
   void _registerEmployee() async {
     if (_formKey.currentState!.validate()) {
@@ -787,29 +1046,26 @@ class _EmployeeRegistrationScreenState extends State<EmployeeRegistrationScreen>
 
       setState(() => _isLoading = true);
 
-      int empTypeId = jobTypeMap[_selectedJobTitle] ?? 1;
-      int userType;
-      if (empTypeId == 1) {
-        userType = 1; // معلم
-      } else {
-        userType = 2; // موظف (إدارة/محاسب)
-      }
+      int empTypeId = _selectedJobTypeId ?? 1;
+      // userType: 1 = معلم (employeeTypeId==1)، 2 = باقي الموظفين
+      int userType = (empTypeId == 1) ? 1 : 2;
+
       Map<String, dynamic> employeeData = {
         "name": _nameController.text.trim(),
         "phone": _phoneController.text.trim(),
         "address": "",  // فارغ كما في السيرفر
         "ParentJob": "",  // فارغ كما في السيرفر
-        "email": _emailController.text.trim(),
+        "email": _emailController.text.trim().isEmpty ?  "" : _emailController.text.trim(),
         "governmentSchool": "",  // فارغ كما في السيرفر
         "attendanceType": "",  // فارغ كما في السيرفر
         "birthDate": DateTime.now().toIso8601String(),  // افتراضي كما في السيرفر
-        "locId": locationMap[_selectedLocation] ?? 1,
+        "locId": _selectedLocId ?? 1,
         "phone2": "",  // فارغ كما في السيرفر
         "ssn": _ssnController.text.trim(),
-        "employeeTypeId": empTypeId,  // 1=معلم، 2=إدارة، 3=محاسب
+        "employeeTypeId": empTypeId,  // ID المسمى الوظيفي من السيرفر
         "educationDegree": _eduController.text.trim(),
         "Password": _passwordController.text,  // Password بحرف كبير
-        "type": userType,  // 2 للمعلمين، 1 للإدارة/محاسبين
+        "type": userType,  // 1 للمعلمين، 2 للباقي
         // joinDate: DateTime.now().toIso8601String(),  // أضفه إذا لزم الأمر
       };
 
@@ -833,6 +1089,45 @@ class _EmployeeRegistrationScreenState extends State<EmployeeRegistrationScreen>
       });
     }
   }
+  Widget _buildJobTypeDropdown() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8, top: 16),
+          child: Row(children: [
+            Text("المسمى الوظيفي",
+                style: TextStyle(fontSize: 14, color: darkBlue, fontWeight: FontWeight.w600)),
+            Text(' *', style: TextStyle(color: Colors.red)),
+          ]),
+        ),
+        DropdownButtonFormField<int>(
+          dropdownColor: Colors.white,
+          decoration: _buildInputDecoration("اختر المسمى الوظيفي"),
+          validator: (value) => value == null ? "مطلوب" : null,
+          value: _selectedJobTypeId,
+          items: _jobTypes.map<DropdownMenuItem<int>>((job) {
+            return DropdownMenuItem<int>(
+              value: job['id'] as int,
+              child: Text(job['name']?.toString() ?? "",
+                  style: const TextStyle(fontFamily: 'Almarai')),
+            );
+          }).toList(),
+          onChanged: (val) {
+            setState(() {
+              _selectedJobTypeId = val;
+              _selectedJobTitle = _jobTypes
+                  .firstWhere((j) => j['id'] == val,
+                  orElse: () => {'name': ''})['name']
+                  ?.toString();
+            });
+          },
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return _BaseRegistrationScreen(
@@ -845,17 +1140,16 @@ class _EmployeeRegistrationScreenState extends State<EmployeeRegistrationScreen>
         _buildInputField("الإسم", "الإسم", controller: _nameController),
         _buildInputField("رقم الهاتف", "01xxxxxxxxx", isPhone: true, controller: _phoneController),
         _buildInputField("الرقم القومي", "14 رقم", controller: _ssnController),
-        _buildDropdownField("المكتب التابع له", locationMap.keys.toList(), onChanged: (val) => _selectedLocation = val),
+        _isLoadingOffices
+            ? const Center(child: CircularProgressIndicator())
+            : _buildLocationDropdown(_offices, _selectedLocId, (val) => setState(() => _selectedLocId = val)),
         _buildInputField("المؤهل الدراسي", "المؤهل", controller: _eduController),
         _buildInputField("البريد الإلكتروني", "example@staff.com", isRequired: false, controller: _emailController),
-        _buildDropdownField(
-          "المسمى الوظيفي",
-          jobTypeMap.keys.toList(),
-          onChanged: (val) => setState(() => _selectedJobTitle = val),
-        ),
+        _isLoadingJobTypes
+            ? const Center(child: CircularProgressIndicator())
+            : _buildJobTypeDropdown(),
 
-        // إظهار حقل رفع الملفات فقط إذا كان المستخدم "معلم/معلمة"
-        if (_selectedJobTitle == "معلم/معلمة")
+        if (_selectedJobTypeId == 1)
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -911,8 +1205,8 @@ class _BaseRegistrationScreen extends StatelessWidget {
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
-          surfaceTintColor: Colors.white, // ضمان ثبات اللون الأبيض
-          scrolledUnderElevation: 0, // منع تغير اللون عند السكرول
+          surfaceTintColor: Colors.white,
+          scrolledUnderElevation: 0,
           title: Text(title, style: TextStyle(color: darkBlue, fontSize: 18, fontWeight: FontWeight.bold)),
           centerTitle: true,
           leading: IconButton(icon: Icon(Icons.arrow_back, color: darkBlue), onPressed: () => Navigator.pop(context)),
@@ -943,6 +1237,39 @@ class _BaseRegistrationScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+Widget _buildLocationDropdown(List<dynamic> locations, int? selectedId, Function(int?) onChanged) {
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text("المكتب التابع له *", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, fontFamily: 'Almarai')),
+      const SizedBox(height: 8),
+      Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<int>(
+            value: locations.any((l) => l['id'] == selectedId) ? selectedId : null,
+            isExpanded: true,
+            hint: const Text("اختر المكتب", style: TextStyle(fontFamily: 'Almarai')),
+            items: locations.map<DropdownMenuItem<int>>((loc) {
+              return DropdownMenuItem<int>(
+                value: loc['id'] as int,
+                child: Text(loc['name']?.toString() ?? "", style: const TextStyle(fontFamily: 'Almarai')),
+              );
+            }).toList(),
+            onChanged: onChanged,
+          ),
+        ),
+      ),
+      const SizedBox(height: 20),
+    ],
+  );
 }
 
 Widget _buildDropdownField(String label, List<String> items, {Function(String?)? onChanged}) {
@@ -976,7 +1303,7 @@ Widget _buildInputField(
       bool isObscured = false,
       VoidCallback? onToggle,
       TextEditingController? controller,
-      TextInputAction? textInputAction, // ضيفي ده
+      TextInputAction? textInputAction,
     }) {
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,

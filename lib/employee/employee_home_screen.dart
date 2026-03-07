@@ -17,7 +17,7 @@ import 'branches_screen/branches_screen.dart'; // تأكد من المسار ا�
 import 'employee/employees_screen.dart';
 import 'employee_attendance_screen.dart';
 import 'employee_attendance_history_screen.dart';
-import 'levels_screen/levels_screen.dart';
+import 'reports_screen/levels_screen/levels_screen.dart';
 
 
 
@@ -61,7 +61,7 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
       }
 
       final profileResponse = await http.get(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetById?id=$numericId'),
+        Uri.parse('https://nourelman.runasp.net/api/Employee/GetById?id=$numericId'),
       );
 
       debugPrint("📥 Status: ${profileResponse.statusCode}");
@@ -75,6 +75,12 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
             _rawResponse = decodedData['data'];
             employeeData = employeeModel.data;
           });
+        }
+        // ✅ احفظ locId عشان شاشة الحضور تستخدمه في التسجيل
+        final locId = decodedData['data']?['locId'];
+        if (locId != null) {
+          await prefs.setInt('user_loc_id', locId as int);
+          debugPrint("✅ Saved user_loc_id: $locId");
         }
       }
     } catch (e) {
@@ -319,7 +325,13 @@ class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
               ),
               onPressed: () async {
                 final prefs = await SharedPreferences.getInstance();
-                await prefs.clear();
+                // ✅ احتفظ بسجلات الحضور المحلية - امسح بس بيانات الـ session
+                final allKeys = prefs.getKeys();
+                for (final key in allKeys) {
+                  if (!key.startsWith('local_attendance_')) {
+                    await prefs.remove(key);
+                  }
+                }
                 if (mounted) {
                   Navigator.pushAndRemoveUntil(
                       context,

@@ -47,7 +47,7 @@ class _GroupDetailsDashboardState extends State<GroupDetailsDashboard>
   }
 
   Future<void> _fetchStudents() async {
-    final String url = 'https://nour-al-eman.runasp.net/api/Group/GetGroupDetails?GroupId=${widget.groupId}&LevelId=${widget.levelId}';
+    final String url = 'https://nourelman.runasp.net/api/Group/GetGroupDetails?GroupId=${widget.groupId}&LevelId=${widget.levelId}';
     try {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
@@ -171,28 +171,28 @@ class _GroupDetailsDashboardState extends State<GroupDetailsDashboard>
                         style: const TextStyle(fontSize: 12, fontFamily: 'Almarai'),
                       ),
                     ),
-                  // أبحاث
-                  Expanded(
-                    flex: 2,
-                    child: Center(
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        icon: const Icon(Icons.search, color: Color(0xFF07427C), size: 20),
-                        onPressed: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                                builder: (c) => StudentExamsScreen(
-                                  studentId: s.id,
-                                  studentName: s.name,
-                                  groupId: widget.groupId, // تمرير القيمة من الشاشة الأب
-                                  levelId: widget.levelId, // تمرير القيمة من الشاشة الأب
-                                )
-                            )
+                    // أبحاث
+                    Expanded(
+                      flex: 2,
+                      child: Center(
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.search, color: Color(0xFF07427C), size: 20),
+                          onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (c) => StudentExamsScreen(
+                                    studentId: s.id,
+                                    studentName: s.name,
+                                    groupId: widget.groupId, // تمرير القيمة من الشاشة الأب
+                                    levelId: widget.levelId, // تمرير القيمة من الشاشة الأب
+                                  )
+                              )
+                          ),
                         ),
                       ),
                     ),
-                  ),
                     Expanded(
                       flex: 3,
                       child: Center(
@@ -274,7 +274,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen> {
     }
   }
   Future<void> _fetchDetails() async {
-    final url = "https://nour-al-eman.runasp.net/api/Student/GetById?id=${widget.studentId}";
+    final url = "https://nourelman.runasp.net/api/Student/GetById?id=${widget.studentId}";
     try {
       final res = await http.get(Uri.parse(url));
       if (res.statusCode == 200) {
@@ -414,7 +414,7 @@ class _WeeklyQuestionsScreenState extends State<WeeklyQuestionsScreen> {
   }
 
   Future<void> _fetch() async {
-    final String url = "https://nour-al-eman.runasp.net/api/Student/GetAllExamBsedOnType?StId=${widget.studentId}&TypeId=1";
+    final String url = "https://nourelman.runasp.net/api/Student/GetAllExamBsedOnType?StId=${widget.studentId}&TypeId=1";
     try {
       final res = await http.get(Uri.parse(url));
       if (res.statusCode == 200) {
@@ -429,7 +429,7 @@ class _WeeklyQuestionsScreenState extends State<WeeklyQuestionsScreen> {
   }
 
   Future<void> _submitGrade(int examId, String grade, String note) async {
-    const String postUrl = "https://nour-al-eman.runasp.net/api/StudentCources/AddStudentExamAsync";
+    const String postUrl = "https://nourelman.runasp.net/api/StudentCources/AddStudentExamAsync";
     try {
       final response = await http.post(
         Uri.parse(postUrl),
@@ -443,12 +443,12 @@ class _WeeklyQuestionsScreenState extends State<WeeklyQuestionsScreen> {
       );
       if (response.statusCode == 200 || response.statusCode == 201) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ تم حفظ التقييم بنجاح"), backgroundColor: Colors.green));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(" تم حفظ التقييم بنجاح"), backgroundColor: Colors.green));
           _fetch();
         }
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("❌ خطأ في الإرسال"), backgroundColor: Colors.red));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(" خطأ في الإرسال"), backgroundColor: Colors.red));
     }
   }
 
@@ -617,7 +617,7 @@ class _StudentExamsScreenState extends State<StudentExamsScreen> {
   Future<void> _fetch() async {
     setState(() => _isLoading = true);
     final String url =
-        "https://nour-al-eman.runasp.net/api/Student/GetAllExamBsedOnType?StId=${widget.studentId}&TypeId=2";
+        "https://nourelman.runasp.net/api/Student/GetAllExamBsedOnType?StId=${widget.studentId}&TypeId=2";
     try {
       final res = await http.get(Uri.parse(url));
       debugPrint("StudentExams API Response: ${res.body.substring(0, res.body.length > 300 ? 300 : res.body.length)}");
@@ -625,10 +625,16 @@ class _StudentExamsScreenState extends State<StudentExamsScreen> {
         final decoded = json.decode(res.body);
         List<dynamic> rawData = decoded["data"] ?? [];
         final normalized = rawData.map((item) {
+          final exam = item["exam"] ?? item["ex"] ?? {};
+          final studentExams = exam["studentExams"] as List?;
+          final firstExam = (studentExams != null && studentExams.isNotEmpty) ? studentExams[0] : null;
+          final grade = item["grade"] ?? item["gr"] ?? firstExam?["grade"];
+          final note = item["note"] ?? item["no"] ?? firstExam?["note"];
+          debugPrint("🔍 EXAM: ${exam["name"]} | grade=$grade | note=$note | studentExams=$studentExams");
           return {
-            "exam": item["exam"] ?? item["ex"] ?? {},
-            "grade": item["grade"] ?? item["gr"],
-            "note": item["note"] ?? item["no"],
+            "exam": exam,
+            "grade": grade,
+            "note": note,
             "studentId": item["studentId"] ?? item["stId"] ?? item["st"],
           };
         }).toList();
@@ -641,30 +647,64 @@ class _StudentExamsScreenState extends State<StudentExamsScreen> {
     }
   }
 
-  Future<void> _submitGrade(int examId, String grade, String note) async {
-    const String postUrl =
-        "https://nour-al-eman.runasp.net/api/StudentCources/AddStudentExamAsync";
+  Future<bool> _submitGrade(int examId, String grade, String note) async {
+    final int gradeInt = int.tryParse(grade) ?? 0;
+    debugPrint("📤 SUBMIT: stId=${widget.studentId}, examId=$examId, grade=$gradeInt, note=$note");
+
     try {
-      final response = await http.post(
-        Uri.parse(postUrl),
+      // أول محاولة: INSERT
+      final postResponse = await http.post(
+        Uri.parse("https://nourelman.runasp.net/api/StudentCources/AddStudentExamAsync"),
         headers: {"Content-Type": "application/json", "Accept": "text/plain"},
         body: jsonEncode({
           "stId": widget.studentId,
           "examId": examId,
-          "grade": int.tryParse(grade) ?? 0,
+          "grade": gradeInt,
           "note": note,
         }),
       );
-      if (response.statusCode == 200 || response.statusCode == 201) {
+      debugPrint("📥 POST RESPONSE: ${postResponse.statusCode} | ${postResponse.body}");
+
+      // لو نجح الـ INSERT
+      final postBody = jsonDecode(postResponse.body);
+      final bool isDuplicate = postBody["error"] != null &&
+          postBody["error"].toString().contains("duplicate key");
+
+      if (postResponse.statusCode == 200 && !isDuplicate) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text("✅ تم حفظ التقييم"), backgroundColor: Colors.green));
-          _fetch();
+          await _fetch();
+        }
+        return true;
+      }
+
+      // لو duplicate key → نستخدم PUT UpdateStudentExam (query params)
+      if (isDuplicate) {
+        debugPrint("🔄 Duplicate key detected, trying PUT UpdateStudentExam...");
+        final putUri = Uri.parse(
+          "https://nourelman.runasp.net/api/StudentCources/UpdateStudentExam"
+              "?StID=${widget.studentId}&ExamId=$examId&Grade=$gradeInt&Note=${Uri.encodeComponent(note)}",
+        );
+        final putResponse = await http.put(
+          putUri,
+          headers: {"Accept": "text/plain"},
+        );
+        debugPrint("📥 PUT RESPONSE: ${putResponse.statusCode} | ${putResponse.body}");
+
+        if (putResponse.statusCode == 200) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text("✅ تم تحديث التقييم"), backgroundColor: Colors.green));
+            await _fetch();
+          }
+          return true;
         }
       }
     } catch (e) {
       debugPrint("Error: $e");
     }
+    return false;
   }
   void _showGradingDialog(dynamic item, bool isGraded) {
     final exam = item["exam"] ?? item["ex"] ?? {};
@@ -737,11 +777,13 @@ class _StudentExamsScreenState extends State<StudentExamsScreen> {
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD17820), padding: const EdgeInsets.symmetric(vertical: 15)),
-                      onPressed: () {
+                      onPressed: () async {
                         if (!isGraded) {
-                          _submitGrade(examId, gradeController.text, noteController.text);
+                          Navigator.pop(ctx); // ← نقفل الـ dialog الأول
+                          await _submitGrade(examId, gradeController.text, noteController.text);
+                        } else {
+                          Navigator.pop(ctx);
                         }
-                        Navigator.pop(ctx);
                       },
                       child: Text(isGraded ? "إغلاق" : "حفظ التقييم", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ),
@@ -755,8 +797,7 @@ class _StudentExamsScreenState extends State<StudentExamsScreen> {
     );
   }
   Future<void> _startDownload(String? relativeUrl, String examName) async {
-    // الرابط الذي يعمل
-    String url = "https://nour-al-eman.runasp.net/api/StudentCources/DownloadLatest?levelId=${widget.levelId}&typeId=2";
+    String url = "https://nourelman.runasp.net/api/StudentCources/DownloadLatest?levelId=${widget.levelId}&typeId=2";
 
     try {
       final directory = Directory('/storage/emulated/0/Download');
@@ -823,11 +864,9 @@ class _StudentExamsScreenState extends State<StudentExamsScreen> {
             final item = _tasks[index];
             final exam = item["exam"] ?? {};
 
-            var gradeVal = item["grade"] ?? (item["studentExams"] != null && item["studentExams"].isNotEmpty
-                ? item["studentExams"][0]["grade"]
-                : null);
-
+            final gradeVal = item["grade"]; // ← من الـ normalized مباشرة
             final bool isGraded = gradeVal != null && gradeVal.toString() != "null";
+            debugPrint("🎨 BUILD item ${exam["name"]} | gradeVal=$gradeVal | isGraded=$isGraded");
 
             return Container(
               margin: const EdgeInsets.only(bottom: 14),

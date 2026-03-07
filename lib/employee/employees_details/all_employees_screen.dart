@@ -26,11 +26,22 @@ class _AllEmployeesScreenState extends State<AllEmployeesScreen> {
     _fetchAllEmployees();
   }
 
+  // بتتحدث تلقائياً كل ما ترجعي لشاشة الموظفين
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && route.isCurrent) {
+      _fetchAllEmployees();
+    }
+  }
+
   Future<void> _fetchAllEmployees() async {
     setState(() => _isLoading = true);
     try {
       final response = await http.get(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetWithType?type=2'),
+        Uri.parse('https://nourelman.runasp.net/api/Employee/GetWithType?type=2')
+        ,
       );
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
@@ -59,7 +70,8 @@ class _AllEmployeesScreenState extends State<AllEmployeesScreen> {
       final prefs = await SharedPreferences.getInstance();
       String? token = prefs.getString('token');
 
-      final url = Uri.parse('https://nour-al-eman.runasp.net/api/Student/ResetPassword');
+      final url =Uri.parse('https://nourelman.runasp.net/api/Student/ResetPassword')
+      ;
 
       final response = await http.post(
         url,
@@ -86,7 +98,8 @@ class _AllEmployeesScreenState extends State<AllEmployeesScreen> {
   Future<void> _deleteEmployee(int id) async {
     try {
       final response = await http.post(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Account/DeActivate?id=$id&type=2'),
+        Uri.parse('https://nourelman.runasp.net/api/Account/DeActivate?id=$id&type=2')
+        ,
       );
       if (response.statusCode == 200) {
         _showSnackBar("تم حذف الموظف بنجاح", Colors.green);
@@ -236,68 +249,73 @@ class _AllEmployeesScreenState extends State<AllEmployeesScreen> {
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: kPrimaryBlue))
-          : Padding(
-        padding: const EdgeInsets.all(12),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SingleChildScrollView(
-              child: Table(
-                columnWidths: const {
-                  0: FlexColumnWidth(1), // رقم #
-                  1: FlexColumnWidth(4), // الاسم
-                  2: FlexColumnWidth(3.5), // الوظيفة
-                  3: FlexColumnWidth(3), // بيانات
-                  4: FlexColumnWidth(4), // السر
-                  5: FlexColumnWidth(3), // حذف
-                },
-                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                children: [
-                  TableRow(
-                    decoration: BoxDecoration(color: Colors.grey[100]),
-                    children: [
-                      _buildHeaderCell("#"),
-                      _buildHeaderCell("الاسم", align: TextAlign.right),
-                      _buildHeaderCell("الوظيفة"),
-                      _buildHeaderCell("بيانات"),
-                      _buildHeaderCell("كلمة المرور"),
-                      _buildHeaderCell("حذف"),
-                    ],
-                  ),
-                  ..._filteredEmployees.asMap().entries.map((entry) {
-                    int index = entry.key;
-                    var emp = entry.value;
-                    return TableRow(
-                      decoration: BoxDecoration(
-                        border: Border(bottom: BorderSide(color: Colors.grey[200]!, width: 0.5)),
-                      ),
+          : RefreshIndicator(
+        color: kPrimaryBlue,
+        onRefresh: _fetchAllEmployees,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Table(
+                  columnWidths: const {
+                    0: FlexColumnWidth(1),
+                    1: FlexColumnWidth(4),
+                    2: FlexColumnWidth(3.5),
+                    3: FlexColumnWidth(3),
+                    4: FlexColumnWidth(4),
+                    5: FlexColumnWidth(3),
+                  },
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  children: [
+                    TableRow(
+                      decoration: BoxDecoration(color: Colors.grey[100]),
                       children: [
-                        _buildDataCell("${index + 1}"),
-                        _buildDataCell(emp['name'] ?? "---", align: TextAlign.right, isBold: true),
-                        _buildDataCell(emp['employeeType']?['name'] ?? "---"),
-                        _buildActionCell(Icons.person_outline, Colors.blue[800]!, () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => EmployeeParentDetailsScreen(
-                                empId: emp['id'],
-                                empName: emp['name'] ?? "بيانات الموظف",
-                              ),
-                            ),
-                          );
-                          _fetchAllEmployees();
-                        }),
-                        _buildActionCell(Icons.lock_open_rounded, Colors.blue[400]!, () => _showResetPasswordDialog(emp['id'], emp['name'])),
-                        _buildActionCell(Icons.delete_outline, Colors.red[400]!, () => _showDeleteConfirmDialog(emp['id'])),
+                        _buildHeaderCell("#"),
+                        _buildHeaderCell("الاسم", align: TextAlign.right),
+                        _buildHeaderCell("الوظيفة"),
+                        _buildHeaderCell("بيانات"),
+                        _buildHeaderCell("كلمة المرور"),
+                        _buildHeaderCell("حذف"),
                       ],
-                    );
-                  }).toList(),
-                ],
+                    ),
+                    ..._filteredEmployees.asMap().entries.map((entry) {
+                      int index = entry.key;
+                      var emp = entry.value;
+                      return TableRow(
+                        decoration: BoxDecoration(
+                          border: Border(bottom: BorderSide(color: Colors.grey[200]!, width: 0.5)),
+                        ),
+                        children: [
+                          _buildDataCell("${index + 1}"),
+                          _buildDataCell(emp['name'] ?? "---", align: TextAlign.right, isBold: true),
+                          _buildDataCell(emp['employeeType']?['name'] ?? "---"),
+                          _buildActionCell(Icons.person_outline, Colors.blue[800]!, () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => EmployeeParentDetailsScreen(
+                                  empId: emp['id'],
+                                  empName: emp['name'] ?? "بيانات الموظف",
+                                ),
+                              ),
+                            );
+                            _fetchAllEmployees();
+                          }),
+                          _buildActionCell(Icons.lock_open_rounded, Colors.blue[400]!, () => _showResetPasswordDialog(emp['id'], emp['name'])),
+                          _buildActionCell(Icons.delete_outline, Colors.red[400]!, () => _showDeleteConfirmDialog(emp['id'])),
+                        ],
+                      );
+                    }).toList(),
+                  ],
+                ),
               ),
             ),
           ),

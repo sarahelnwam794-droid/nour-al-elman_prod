@@ -10,7 +10,10 @@ class AttendanceModel {
   AttendanceModel({this.data, this.statusCode, this.error});
 
   factory AttendanceModel.fromJson(Map<String, dynamic> json) => AttendanceModel(
-    data: json["data"] == null ? null : List<AttendanceData>.from(json["data"].map((x) => AttendanceData.fromJson(x))),
+    data: json["data"] == null
+        ? null
+        : List<AttendanceData>.from(
+        json["data"].map((x) => AttendanceData.fromJson(x))),
     statusCode: json["statusCode"],
     error: json["error"],
   );
@@ -36,8 +39,11 @@ class AttendanceData {
   });
 
   factory AttendanceData.fromJson(Map<String, dynamic> json) => AttendanceData(
-    userName: json["userName"],
+    // ✅ FIX: السيرفر بيرجع "username" (lowercase) مش "userName"
+    // بنجرب الاتنين عشان نضمن الشغل في كل الحالات
+    userName: json["userName"] ?? json["username"],
     checkType: json["checkType"],
+    // ✅ FIX: السيرفر بيرجع "locationName" - تأكد من الحقل ده
     locationName: json["locationName"],
     date: json["date"],
     checkInTime: json["checkInTime"],

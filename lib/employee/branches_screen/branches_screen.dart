@@ -49,7 +49,7 @@ class _BranchesScreenState extends State<BranchesScreen> {
 
     try {
       final response = await http.get(
-        Uri.parse("https://nour-al-eman.runasp.net/api/Locations/GetAll"),
+        Uri.parse("https://nourelman.runasp.net/api/Locations/GetAll"),
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
@@ -68,7 +68,7 @@ class _BranchesScreenState extends State<BranchesScreen> {
 
   Future<void> submitBranch({required bool isEdit, int? id}) async {
     final String endpoint = isEdit ? "Update" : "Save";
-    final String url = "https://nour-al-eman.runasp.net/api/Locations/$endpoint";
+    final String url = "https://nourelman.runasp.net/api/Locations/$endpoint";
 
     // تجميع الـ 8 قيم (4 نقاط × Lat/Long)
     String coords =
@@ -118,7 +118,8 @@ class _BranchesScreenState extends State<BranchesScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse("https://nour-al-eman.runasp.net/api/Locations/Delete?id=$id"),
+        Uri.parse("https://nourelman.runasp.net/api/Locations/Delete?id=$id")
+        ,
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {

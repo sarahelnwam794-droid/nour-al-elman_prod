@@ -8,7 +8,7 @@ import 'dart:ui' as ui;
 // تعريفات الألوان والمقاسات
 final Color primaryOrange = Color(0xFFC66422);
 final Color darkBlue = Color(0xFF2E3542);
-final String baseUrl = 'https://nour-al-eman.runasp.net/api';
+final String baseUrl = 'https://nourelman.runasp.net/api';
 
 class EditStudentScreen extends StatefulWidget {
   final int studentId;
@@ -35,6 +35,8 @@ class _EditStudentScreenState extends State<EditStudentScreen> {
   DateTime? joinDate;
   int? selectedLocId;
   String? attendanceType;
+  List<dynamic> _locations = [];
+  bool _isLoadingLocations = true;
   String? paymentType;
   String? documentType;
   String? typeInfamily;
@@ -63,6 +65,29 @@ class _EditStudentScreenState extends State<EditStudentScreen> {
     }
     if (widget.initialData?['joinDate'] != null) {
       joinDate = DateTime.parse(widget.initialData!['joinDate']);
+    }
+    _fetchLocations();
+  }
+
+  Future<void> _fetchLocations() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/Locations/GetAll'));
+      if (response.statusCode == 200) {
+        final decoded = json.decode(response.body);
+        final list = decoded is List ? decoded : (decoded['data'] ?? []);
+        setState(() {
+          _locations = list;
+          _isLoadingLocations = false;
+          // تأكد إن الـ selectedLocId موجود في القائمة
+          if (selectedLocId != null) {
+            bool exists = _locations.any((loc) => loc['id'] == selectedLocId);
+            if (!exists) selectedLocId = null;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching locations: $e");
+      setState(() => _isLoadingLocations = false);
     }
   }
 
@@ -108,11 +133,19 @@ class _EditStudentScreenState extends State<EditStudentScreen> {
                 TextFormField(controller: addressController, decoration: _buildInputDecoration("العنوان بالتفصيل")),
                 const SizedBox(height: 18),
                 _buildLabel("المكتب التابع له", isRequired: true),
-                DropdownButtonFormField<int>(
-                  value: [2].contains(selectedLocId) ? selectedLocId : null,
+                _isLoadingLocations
+                    ? const Center(child: CircularProgressIndicator())
+                    : DropdownButtonFormField<int>(
+                  value: _locations.any((loc) => loc['id'] == selectedLocId) ? selectedLocId : null,
                   decoration: _buildInputDecoration("اختر المكتب"),
-                  items: [DropdownMenuItem(value: 2, child: Text("مدرسة نور الإيمان"))],
+                  items: _locations.map<DropdownMenuItem<int>>((loc) {
+                    return DropdownMenuItem<int>(
+                      value: loc['id'] as int,
+                      child: Text(loc['name']?.toString() ?? ""),
+                    );
+                  }).toList(),
                   onChanged: (val) => setState(() => selectedLocId = val),
+                  validator: (val) => val == null ? 'اختر المكتب' : null,
                 ),
                 const SizedBox(height: 18),
                 Row(

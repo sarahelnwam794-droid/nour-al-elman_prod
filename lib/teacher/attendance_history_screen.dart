@@ -34,72 +34,97 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     return null;
   }
 
+  // ✅ تحويل أي صيغة تاريخ لـ "yyyy-MM-dd" للمقارنة
+  String? _toNormalizedDate(String? dateStr) {
+    final parsed = _parseServerDate(dateStr);
+    if (parsed == null) return null;
+    return DateFormat('yyyy-MM-dd').format(parsed);
+  }
+
   Future<void> _fetchAttendanceLogs() async {
     setState(() => _isLoading = true);
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final String? userId = prefs.getString('user_id');
-      final String? loginDataStr = prefs.getString('loginData');
 
       if (userId == null || userId.isEmpty || userId == "0") {
         _showError("لم يتم العثور على بيانات المستخدم");
         return;
       }
 
-      String? userName;
-      if (loginDataStr != null) {
-        try {
-          final loginData = jsonDecode(loginDataStr);
-          userName = loginData['name']?.toString() ?? loginData['userName']?.toString();
-        } catch (_) {}
-      }
+      // ── الخطوة 1: جيب كل السجلات المحلية (من كل الـ keys) ──
+      // كل بصمة تظهر لوحدها - مش بنعمل merge بالتاريخ
+      final allKeys = prefs.getKeys();
+      final attendanceKeys = allKeys.where((k) => k.startsWith('local_attendance')).toList();
+      final possibleKeys = {'local_attendance_$userId', ...attendanceKeys};
 
-      List<AttendanceData> allRecords = [];
+      final List<AttendanceData> allRecords = [];
+      final Set<String> addedKeys = {};
 
-      // ── 1. جرب الـ server أولاً ──
-      try {
-        final urlById = "https://nour-al-eman.runasp.net/api/Locations/GetAll-employee-attendance-ByEmpId?EmpId=$userId";
-        final responseById = await http.get(Uri.parse(urlById));
-        if (responseById.statusCode == 200) {
-          final decoded = jsonDecode(responseById.body);
-          final List<dynamic> dataById = decoded['data'] ?? [];
-          if (dataById.isNotEmpty) {
-            allRecords = attendanceModelFromJson(responseById.body).data ?? [];
-            // ✅ فلتر بالـ userId من الـ loginData
-            // السيرفر عنده bug - بيحفظ userName غلط
-            // الحل: نحفظ الـ records المحلية بس ونتجاهل فلتر الاسم من السيرفر
-            // لأن كل البصمات في نفس location بترجع بنفس الاسم غلط
-          }
-        }
-      } catch (_) {}
-
-      // ── 2. جيب المحفوظ محلياً وادمجه ──
-      final String localKey = 'local_attendance_$userId';
-      final String? localJson = prefs.getString(localKey);
-      if (localJson != null) {
+      for (final localKey in possibleKeys) {
+        final String? localJson = prefs.getString(localKey);
+        if (localJson == null) continue;
         try {
           final List<dynamic> localList = jsonDecode(localJson);
-          final List<AttendanceData> localRecords = localList.map((item) => AttendanceData(
-            userName: item['userName'],
-            checkType: item['checkType'],
-            locationName: item['locationName'],
-            date: item['date'],
-            checkInTime: item['checkInTime'],
-            checkOutTime: item['checkOutTime'],
-            workingHours: item['workingHours'],
-          )).toList();
-
-          // ادمج: السجلات المحلية بس اللي مش موجودة في السيرفر
-          final serverDates = allRecords.map((r) => r.date).toSet();
-          for (var local in localRecords) {
-            if (!serverDates.contains(local.date)) {
-              allRecords.add(local);
-            }
+          for (var item in localList) {
+            final normDate = _toNormalizedDate(item['date']?.toString());
+            if (normDate == null) continue;
+            final inTime = item['checkInTime']?.toString() ?? '';
+            final uniqueKey = '$normDate|$inTime';
+            if (addedKeys.contains(uniqueKey)) continue;
+            addedKeys.add(uniqueKey);
+            allRecords.add(AttendanceData(
+              userName: item['userName'] ?? item['username'],
+              checkType: item['checkType'],
+              locationName: item['locationName'],
+              date: item['date'],
+              checkInTime: item['checkInTime'],
+              checkOutTime: item['checkOutTime'],
+              workingHours: item['workingHours'],
+            ));
           }
         } catch (e) {
           debugPrint('Error loading local: $e');
         }
+      }
+
+      // ── الخطوة 2: جيب السيرفر وأضف اللي مش موجود محلياً ──
+      try {
+        final prefsT = await SharedPreferences.getInstance();
+        final String tokenT = prefsT.getString('user_token') ?? '';
+        final urlById =
+            "https://nourelman.runasp.net/api/Locations/GetAll-employee-attendance?UserId=${prefsT.getString('user_guid') ?? ''}";
+        final responseById = await http.get(
+          Uri.parse(urlById),
+          headers: {
+            if (tokenT.isNotEmpty && tokenT != 'no_token')
+              'Authorization': 'Bearer $tokenT',
+          },
+        );
+        if (responseById.statusCode == 200) {
+          final decoded = jsonDecode(responseById.body);
+          final List<dynamic> serverData = decoded['data'] ?? [];
+          for (var item in serverData) {
+            final normDate = _toNormalizedDate(item['date']?.toString());
+            if (normDate == null) continue;
+            final inTime = item['checkInTime']?.toString() ?? '';
+            final uniqueKey = '$normDate|$inTime';
+            if (addedKeys.contains(uniqueKey)) continue;
+            addedKeys.add(uniqueKey);
+            allRecords.add(AttendanceData(
+              userName: item['userName'] ?? item['username'],
+              checkType: item['checkType'],
+              locationName: item['locationName'],
+              date: item['date'],
+              checkInTime: item['checkInTime'],
+              checkOutTime: item['checkOutTime'],
+              workingHours: item['workingHours'],
+            ));
+          }
+        }
+      } catch (_) {
+        // السيرفر مش متاح - السجلات المحلية كافية
       }
 
       _processData(allRecords);
@@ -121,9 +146,13 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   void _processData(List<AttendanceData> rawData) {
     Map<String, List<AttendanceData>> groups = {};
 
-    List<AttendanceData> validData = rawData.where((item) => _parseServerDate(item.date) != null).toList();
-    validData.sort((a, b) => _parseServerDate(b.date)!.compareTo(_parseServerDate(a.date)!));
+    List<AttendanceData> validData = rawData
+        .where((item) => _parseServerDate(item.date) != null)
+        .toList();
+    validData.sort(
+            (a, b) => _parseServerDate(b.date)!.compareTo(_parseServerDate(a.date)!));
 
+    // ✅ كل record يظهر على حدة - كل بصمة في سطر لوحده
     for (var entry in validData) {
       DateTime date = _parseServerDate(entry.date)!;
       String monthYear = DateFormat('MMMM yyyy', 'ar').format(date);
@@ -146,7 +175,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
         backgroundColor: Colors.white,
         appBar: AppBar(
           title: const Text("حضور و انصراف المعلم",
-              style: TextStyle(fontWeight: FontWeight.bold, fontFamily: 'Almarai', fontSize: 16)),
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, fontFamily: 'Almarai', fontSize: 16)),
           centerTitle: true,
           backgroundColor: Colors.white,
           elevation: 0.5,
@@ -186,18 +216,21 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
           IconButton(
             icon: const Icon(Icons.arrow_back_ios_new, size: 20, color: Colors.black87),
             onPressed: _currentMonthIndex > 0
-                ? () => setState(() => _currentMonthIndex--) : null,
+                ? () => setState(() => _currentMonthIndex--)
+                : null,
           ),
           const SizedBox(width: 15),
           Text(
             _availableMonths[_currentMonthIndex],
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'Almarai'),
+            style: const TextStyle(
+                fontSize: 15, fontWeight: FontWeight.bold, fontFamily: 'Almarai'),
           ),
           const SizedBox(width: 15),
           IconButton(
             icon: const Icon(Icons.arrow_forward_ios, size: 20, color: Colors.black87),
             onPressed: _currentMonthIndex < _availableMonths.length - 1
-                ? () => setState(() => _currentMonthIndex++) : null,
+                ? () => setState(() => _currentMonthIndex++)
+                : null,
           ),
         ],
       ),
@@ -224,8 +257,14 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
   Widget _headerItem(String label) {
     return Expanded(
-      child: Text(label, textAlign: TextAlign.center,
-        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 12, fontFamily: 'Almarai'),
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.grey,
+            fontSize: 12,
+            fontFamily: 'Almarai'),
       ),
     );
   }
@@ -265,17 +304,25 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                 ),
               ),
               Expanded(
-                child: Text(log.checkInTime ?? "--", textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 11),
+                child: Text(
+                  log.checkInTime ?? "--",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.green, fontWeight: FontWeight.bold, fontSize: 11),
                 ),
               ),
               Expanded(
-                child: Text(log.checkOutTime ?? "--", textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 11),
+                child: Text(
+                  log.checkOutTime ?? "--",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.red, fontWeight: FontWeight.bold, fontSize: 11),
                 ),
               ),
               Expanded(
-                child: Text(log.workingHours ?? "--", textAlign: TextAlign.center,
+                child: Text(
+                  log.workingHours ?? "--",
+                  textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
                 ),
               ),
@@ -293,8 +340,10 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
         children: [
           Icon(Icons.event_busy, size: 80, color: Colors.grey[300]),
           const SizedBox(height: 16),
-          const Text("لا توجد سجلات حضور متاحة حالياً", style: TextStyle(color: Colors.grey, fontFamily: 'Almarai')),
-          TextButton(onPressed: _fetchAttendanceLogs, child: const Text("تحديث البيانات"))
+          const Text("لا توجد سجلات حضور متاحة حالياً",
+              style: TextStyle(color: Colors.grey, fontFamily: 'Almarai')),
+          TextButton(
+              onPressed: _fetchAttendanceLogs, child: const Text("تحديث البيانات"))
         ],
       ),
     );

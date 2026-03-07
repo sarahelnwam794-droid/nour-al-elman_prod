@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Student {
   final int id;
@@ -24,7 +25,9 @@ class StudentAttendanceScreen extends StatefulWidget {
   State<StudentAttendanceScreen> createState() => _StudentAttendanceScreenState();
 }
 
-class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
+class _StudentAttendanceScreenState extends State<StudentAttendanceScreen>
+    with WidgetsBindingObserver {
+
   static const Color kDarkBlue = Color(0xFF07427C);
   static const Color kOrange   = Color(0xFFC66422);
   static const Color kBg       = Color(0xFFF4F6FA);
@@ -33,21 +36,74 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
   bool _isLoading = false;
   bool _isSaving  = false;
 
-  // history قبل النهارده
   Map<int, List<Map<String, dynamic>>> _historyByStudent = {};
-
-  // الفورم الحالي
   late List<Map<String, dynamic>> _newEntries;
 
   final List<String> _ratingOptions = ["ممتاز", "جيد جدا", "جيد", "مقبول", "ضعيف"];
 
+  String get _cacheKey =>
+      "att_${widget.groupId}_${DateFormat('yyyy-MM-dd').format(DateTime.now())}";
+
+  // ═══════════════════════════════════════════════════════════════════════════
   @override
   void initState() {
     super.initState();
-    // نبدأ بقائمة فاضية ريح لحد ما يييجي الداتا
+    WidgetsBinding.instance.addObserver(this);
     _newEntries = widget.students.map((s) => _emptyEntry(s)).toList();
-    _fetchAndFillForm();
+    _loadCachedThenFetch();
   }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadCachedThenFetch();
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Persistence
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _loadCachedThenFetch() async {
+    await _loadFromCache();
+    await _fetchAndFillForm();
+  }
+
+  Future<void> _loadFromCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw   = prefs.getString(_cacheKey);
+      if (raw == null) return;
+      final List decoded = json.decode(raw);
+      if (!mounted) return;
+      setState(() {
+        _newEntries = widget.students.map((s) {
+          final cached = decoded.firstWhere(
+                (e) => e["stId"] == s.id,
+            orElse: () => null,
+          );
+          return cached != null ? Map<String, dynamic>.from(cached) : _emptyEntry(s);
+        }).toList();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _saveToCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_cacheKey, json.encode(_newEntries));
+    } catch (_) {}
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // API
+  // ══════════════════════════════════════════════════════════════════════════
 
   Map<String, dynamic> _emptyEntry(Student s) => {
     "stId"   : s.id,
@@ -59,39 +115,25 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
     "points" : "",
   };
 
-  // ============================================================
-  // ✅ المنطق الأساسي: نجيب الداتا ونملي الفورم
-  // ============================================================
   Future<void> _fetchAndFillForm() async {
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
     try {
-      final url = "https://nour-al-eman.runasp.net/api/Group/GetGroupAttendace?GroupId=${widget.groupId}";
+      final url = "https://nourelman.runasp.net/api/Group/GetGroupAttendace?GroupId=${widget.groupId}";
       final res = await http.get(Uri.parse(url));
-
       if (res.statusCode != 200) return;
 
-      final List raw = json.decode(res.body)["data"] ?? [];
-
-      // ✅ نجيب تاريخ النهارده بصيغة "yyyy-MM-dd" من غير توقيت
-      // السيرفر بيخزن local time، فبنقارن الـ date part بس
-      final String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-      // آخر سجل لكل طالب النهارده (بـ id الأكبر)
+      final List raw           = json.decode(res.body)["data"] ?? [];
+      final String todayDate   = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final Map<int, Map<String, dynamic>> todayLatest = {};
-      // كل السجلات قبل النهارده
       final Map<int, List<Map<String, dynamic>>> history = {};
 
       for (final item in raw) {
-        final int stId       = item["studentId"] ?? 0;
-        final String? dateStr = item["createDate"]; // "2026-02-23T01:37:58.85"
+        final int stId        = item["studentId"] ?? 0;
+        final String? dateStr = item["createDate"];
         if (dateStr == null) continue;
-
-        // ✅ نقارن الـ date part فقط (أول 10 حروف)
-        final String itemDate = dateStr.substring(0, 10); // "2026-02-23"
-        final bool isToday = itemDate == todayDate;
+        final bool isToday = dateStr.substring(0, 10) == todayDate;
 
         if (isToday) {
-          // نحتفظ بالأحدث (أكبر id)
           final int currentId  = item["id"] ?? 0;
           final int existingId = todayLatest[stId]?["_id"] ?? -1;
           if (currentId > existingId) {
@@ -117,9 +159,7 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
         }
       }
 
-      // ✅ نملي الفورم:
-      // - لو عنده سجل النهارده → حط آخر حالة
-      // - لو ملهوش → غياب تلقائي
+      if (!mounted) return;
       setState(() {
         _historyByStudent = history;
         _newEntries = widget.students.map((s) {
@@ -135,9 +175,14 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
               "points" : rec["points"],
             };
           }
-          return _emptyEntry(s); // غياب
+          return _newEntries.firstWhere(
+                (e) => e["stId"] == s.id,
+            orElse: () => _emptyEntry(s),
+          );
         }).toList();
       });
+
+      await _saveToCache();
     } catch (e) {
       debugPrint("Fetch error: $e");
     } finally {
@@ -145,9 +190,6 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
     }
   }
 
-  // ============================================================
-  // ✅ الحفظ: نبعت للسيرفر، وبعدين نرفرش
-  // ============================================================
   Future<void> _saveNewRecords() async {
     setState(() => _isSaving = true);
 
@@ -167,39 +209,33 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
 
     try {
       final res = await http.post(
-        Uri.parse("https://nour-al-eman.runasp.net/api/StudentAttendance/submit"),
+        Uri.parse("https://nourelman.runasp.net/api/StudentAttendance/submit"),
         headers: {"accept": "*/*", "Content-Type": "application/json"},
         body: jsonEncode(payload),
       );
 
       if (res.statusCode == 200 || res.statusCode == 201) {
-        _showToast("✅ تم الحفظ بنجاح", kDarkBlue);
-        // ✅ الفورم يفضل زي ما هو - الـ checkboxes والتقييمات مش بتتغير
-        // بس نرفرش الـ history section في الخلفية بس
+        _showToast(" تم الحفظ بنجاح", kDarkBlue);
+        await _saveToCache();
         _fetchHistoryOnly();
       } else {
-        _showToast("❌ خطأ: ${res.statusCode}", Colors.red);
+        _showToast(" خطأ: ${res.statusCode}", Colors.red);
         debugPrint("Save error body: ${res.body}");
       }
     } catch (e) {
-      _showToast("❌ فشل الاتصال", Colors.red);
+      _showToast(" فشل الاتصال", Colors.red);
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  // ============================================================
-  // Helpers
-  // ============================================================
-
-  // ✅ بيرفرش الـ history فقط من غير ما يلمس الفورم
   Future<void> _fetchHistoryOnly() async {
     try {
-      final url = "https://nour-al-eman.runasp.net/api/Group/GetGroupAttendace?GroupId=${widget.groupId}";
+      final url = "https://nourelman.runasp.net/api/Group/GetGroupAttendace?GroupId=${widget.groupId}";
       final res = await http.get(Uri.parse(url));
       if (res.statusCode != 200) return;
 
-      final List raw = json.decode(res.body)["data"] ?? [];
+      final List raw         = json.decode(res.body)["data"] ?? [];
       final String todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
       final Map<int, List<Map<String, dynamic>>> history = {};
@@ -207,8 +243,7 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
         final int stId        = item["studentId"] ?? 0;
         final String? dateStr = item["createDate"];
         if (dateStr == null) continue;
-        final bool isToday = dateStr.substring(0, 10) == todayDate;
-        if (!isToday) {
+        if (dateStr.substring(0, 10) != todayDate) {
           history.putIfAbsent(stId, () => []);
           history[stId]!.add({
             "isPresent"        : item["isPresent"] ?? false,
@@ -225,6 +260,11 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
       debugPrint("History fetch error: $e");
     }
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Helpers
+  // ══════════════════════════════════════════════════════════════════════════
+
   String? _toRating(dynamic index) {
     if (index == null) return null;
     int i = (index is int) ? index : int.tryParse(index.toString()) ?? 0;
@@ -249,9 +289,10 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
     ));
   }
 
-  // ============================================================
+  // ══════════════════════════════════════════════════════════════════════════
   // Build
-  // ============================================================
+  // ══════════════════════════════════════════════════════════════════════════
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -259,20 +300,28 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
       child: Scaffold(
         backgroundColor: kBg,
         bottomNavigationBar: _buildSaveButton(),
-        body: _isLoading
+        body: _isLoading && _newEntries.every((e) => e["status"] == false)
             ? const Center(child: CircularProgressIndicator(color: kDarkBlue))
-            : Column(
-          children: [
-            _buildFormSection(),
-            const SizedBox(height: 8),
-            _buildHistorySection(),
-          ],
+            : SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildFormSection(),
+              const SizedBox(height: 8),
+              _buildHistorySection(),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  // ===== جدول الإدخال =====
+  // ═══════════════════════════════════════════════════════════════════════════
+  // نسب الأعمدة الثابتة
+  // ═══════════════════════════════════════════════════════════════════════════
+  static const double _c1  = 44;  // حضور  (ثابت)
+  static const double _c4  = 44;  // تعليق (ثابت)
+  static const double _gap = 4;
+
   Widget _buildFormSection() {
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -285,63 +334,103 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
             blurRadius: 8,
             offset: const Offset(0, 3))],
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // هيدر
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 11),
-            decoration: const BoxDecoration(
-              color: kDarkBlue,
-              borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(13),
-                  topRight: Radius.circular(13)),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // عرض المساحة المتاحة بعد طرح الأعمدة الثابتة والـ padding والـ gaps
+          final double available =
+              constraints.maxWidth - 16 - _c1 - _c4 - (_gap * 4);
+          final double cName   = available * 0.35;
+          final double cOldNew = available * 0.325;
+
+          // ── دالة بناء خلية الهيدر بنفس أبعاد خلايا الصف تماماً ──────────
+          Widget colHeader(String t, double w) => SizedBox(
+            width: w,
+            child: Text(
+              t,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 11,
+                  fontFamily: 'Almarai'),
             ),
-            child: Row(
-              children: const [
-                Expanded(flex: 5, child: _HCell("اسم الطالب")),
-                Expanded(flex: 2, child: _HCell("الحضور")),
-                Expanded(flex: 4, child: _HCell("حفظ قديم")),
-                Expanded(flex: 4, child: _HCell("حفظ جديد")),
-                Expanded(flex: 3, child: _HCell("تعليق")),
-              ],
-            ),
-          ),
-          // صفوف
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _newEntries.length,
-            separatorBuilder: (_, __) => Divider(height: 1, color: kBorder),
-            itemBuilder: (_, i) => _buildRow(i),
-          ),
-        ],
+          );
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── هيدر ──────────────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
+                decoration: const BoxDecoration(
+                  color: kDarkBlue,
+                  borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(13),
+                      topRight: Radius.circular(13)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    colHeader("اسم الطالب", cName),
+                    SizedBox(width: _gap),
+                    colHeader("حضور", _c1),
+                    SizedBox(width: _gap),
+                    colHeader("حفظ قديم", cOldNew),
+                    SizedBox(width: _gap),
+                    colHeader("حفظ جديد", cOldNew),
+                    SizedBox(width: _gap),
+                    colHeader("تعليق", _c4),
+                  ],
+                ),
+              ),
+              // ── صفوف الطلاب ───────────────────────────────────────────────
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _newEntries.length,
+                separatorBuilder: (_, __) => Divider(height: 1, color: kBorder),
+                itemBuilder: (_, i) => _buildRow(i, cName, cOldNew),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildRow(int i) {
+  Widget _buildRow(int i, double cName, double cOldNew) {
     final entry   = _newEntries[i];
     final present = entry["status"] == true;
     final hasNote = entry["note"]?.toString().trim().isNotEmpty == true;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 6),
+    return Container(
+      color: i % 2 == 0 ? Colors.white : const Color(0xFFF8F9FC),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // اسم الطالب
-          Expanded(
-            flex: 5,
-            child: Text(entry["name"],
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                    color: Color(0xFF1A2340), fontFamily: 'Almarai'),
-                overflow: TextOverflow.ellipsis),
-          ),
 
-          // checkbox
-          Expanded(
-            flex: 2,
-            child: Center(
+          // ── اسم الطالب ────────────────────────────────────────────────────
+          SizedBox(
+            width: cName,
+            child: Text(
+              entry["name"],
+              textAlign: TextAlign.center, // ✅ محاذاة مطابقة للهيدر
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1A2340),
+                  fontFamily: 'Almarai'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          SizedBox(width: _gap),
+
+          // ── حضور ─────────────────────────────────────────────────────────
+          SizedBox(
+            width: _c1,
+            child: Center( // ✅ نفس عرض الهيدر + Center
               child: Transform.scale(
                 scale: 0.85,
                 child: Checkbox(
@@ -349,39 +438,76 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
                   activeColor: kDarkBlue,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(4)),
-                  onChanged: (v) => setState(() {
-                    _newEntries[i]["status"] = v;
-                    if (v == false) {
-                      _newEntries[i]["oldSave"] = null;
-                      _newEntries[i]["newSave"] = null;
-                    }
-                  }),
+                  onChanged: (v) async {
+                    setState(() {
+                      final u = Map<String, dynamic>.from(_newEntries[i]);
+                      u["status"] = v;
+                      if (v == false) {
+                        u["oldSave"] = null;
+                        u["newSave"] = null;
+                      }
+                      _newEntries[i] = u;
+                    });
+                    await _saveToCache();
+                  },
                 ),
               ),
             ),
           ),
+          SizedBox(width: _gap),
 
-          // حفظ قديم
-          Expanded(flex: 4, child: _ratingDrop(i, "oldSave", present)),
+          // ── حفظ قديم ─────────────────────────────────────────────────────
+          SizedBox(
+            width: cOldNew,
+            child: _IndependentDrop(
+              key: ValueKey("old_${_newEntries[i]['stId']}"),
+              value: _newEntries[i]["oldSave"],
+              options: _ratingOptions,
+              enabled: present,
+              onChanged: (val) async {
+                setState(() {
+                  final u = Map<String, dynamic>.from(_newEntries[i]);
+                  u["oldSave"] = val;
+                  _newEntries[i] = u;
+                });
+                await _saveToCache();
+              },
+            ),
+          ),
+          SizedBox(width: _gap),
 
-          // حفظ جديد
-          Expanded(flex: 4, child: _ratingDrop(i, "newSave", present)),
+          // ── حفظ جديد ─────────────────────────────────────────────────────
+          SizedBox(
+            width: cOldNew,
+            child: _IndependentDrop(
+              key: ValueKey("new_${_newEntries[i]['stId']}"),
+              value: _newEntries[i]["newSave"],
+              options: _ratingOptions,
+              enabled: present,
+              onChanged: (val) async {
+                setState(() {
+                  final u = Map<String, dynamic>.from(_newEntries[i]);
+                  u["newSave"] = val;
+                  _newEntries[i] = u;
+                });
+                await _saveToCache();
+              },
+            ),
+          ),
+          SizedBox(width: _gap),
 
-          // تعليق
-          Expanded(
-            flex: 3,
-            child: Center(
+          // ── تعليق ─────────────────────────────────────────────────────────
+          SizedBox(
+            width: _c4,
+            child: Center( // ✅ نفس عرض الهيدر + Center
               child: InkWell(
                 onTap: present ? () => _showNoteDialog(i) : null,
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 5),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
                   decoration: BoxDecoration(
                     color: present
-                        ? (hasNote
-                        ? kDarkBlue.withOpacity(0.12)
-                        : kBg)
+                        ? (hasNote ? kDarkBlue.withOpacity(0.12) : kBg)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -401,29 +527,9 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
     );
   }
 
-  Widget _ratingDrop(int i, String key, bool enabled) {
-    return DropdownButtonHideUnderline(
-      child: DropdownButton<String>(
-        value: _newEntries[i][key],
-        isExpanded: true,
-        hint: Text("—",
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade400)),
-        style: const TextStyle(
-            fontSize: 11,
-            color: Color(0xFF1A2340),
-            fontFamily: 'Almarai'),
-        iconSize: 14,
-        onChanged: enabled
-            ? (val) => setState(() => _newEntries[i][key] = val)
-            : null,
-        items: _ratingOptions
-            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-            .toList(),
-      ),
-    );
-  }
-
-  // ===== زر الحفظ الثابت =====
+  // ═══════════════════════════════════
+  // زر الحفظ
+  // ═══════════════════════════════════
   Widget _buildSaveButton() {
     return SafeArea(
       child: Container(
@@ -449,11 +555,11 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
             ),
             onPressed: _isSaving ? null : _saveNewRecords,
             icon: _isSaving
-                ? const SizedBox(width: 18, height: 18,
+                ? const SizedBox(
+                width: 18, height: 18,
                 child: CircularProgressIndicator(
                     color: Colors.white, strokeWidth: 2))
-                : const Icon(Icons.save_rounded,
-                color: Colors.white, size: 18),
+                : const Icon(Icons.save_rounded, color: Colors.white, size: 18),
             label: Text(
               _isSaving ? "جاري الحفظ..." : "حفظ التعديلات",
               style: const TextStyle(
@@ -468,90 +574,89 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
     );
   }
 
-  // ===== History السابق =====
+  // ═══════════════════════════════════
+  // History السابق
+  // ═══════════════════════════════════
   Widget _buildHistorySection() {
     if (_historyByStudent.isEmpty) return const SizedBox.shrink();
 
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: Row(
-              children: const [
-                Icon(Icons.history_rounded, size: 16, color: kDarkBlue),
-                SizedBox(width: 6),
-                Text("سجل الحضور السابق",
-                    style: TextStyle(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Row(
+            children: const [
+              Icon(Icons.history_rounded, size: 16, color: kDarkBlue),
+              SizedBox(width: 6),
+              Text("سجل الحضور السابق",
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: kDarkBlue,
+                      fontFamily: 'Almarai')),
+            ],
+          ),
+        ),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+          itemCount: widget.students.length,
+          itemBuilder: (_, si) {
+            final st      = widget.students[si];
+            final records = _historyByStudent[st.id] ?? [];
+            if (records.isEmpty) return const SizedBox.shrink();
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: kBorder),
+              ),
+              child: ExpansionTile(
+                tilePadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                childrenPadding:
+                const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: kDarkBlue.withOpacity(0.1),
+                  child: Text(
+                    st.name.isNotEmpty ? st.name[0] : "?",
+                    style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: kDarkBlue,
+                        color: kDarkBlue),
+                  ),
+                ),
+                title: Text(st.name,
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1A2340),
                         fontFamily: 'Almarai')),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
-              itemCount: widget.students.length,
-              itemBuilder: (_, si) {
-                final st      = widget.students[si];
-                final records = _historyByStudent[st.id] ?? [];
-                if (records.isEmpty) return const SizedBox.shrink();
-
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
+                trailing: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: kBorder),
+                    color: kDarkBlue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  child: ExpansionTile(
-                    tilePadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 2),
-                    childrenPadding:
-                    const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                    leading: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: kDarkBlue.withOpacity(0.1),
-                      child: Text(
-                        st.name.isNotEmpty ? st.name[0] : "?",
-                        style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: kDarkBlue),
-                      ),
-                    ),
-                    title: Text(st.name,
-                        style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1A2340),
-                            fontFamily: 'Almarai')),
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: kDarkBlue.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text("${records.length} سجل",
-                          style: const TextStyle(
-                              fontSize: 11,
-                              color: kDarkBlue,
-                              fontWeight: FontWeight.bold)),
-                    ),
-                    children: records
-                        .map((rec) => _buildHistoryCard(rec))
-                        .toList(),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+                  child: Text("${records.length} سجل",
+                      style: const TextStyle(
+                          fontSize: 11,
+                          color: kDarkBlue,
+                          fontWeight: FontWeight.bold)),
+                ),
+                children:
+                records.map((rec) => _buildHistoryCard(rec)).toList(),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -573,9 +678,7 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
         borderRadius: BorderRadius.circular(10),
         border: Border(
           right: BorderSide(
-              color: present
-                  ? const Color(0xFF2E7D32)
-                  : Colors.red.shade300,
+              color: present ? const Color(0xFF2E7D32) : Colors.red.shade300,
               width: 3),
         ),
       ),
@@ -585,27 +688,20 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
           Row(
             children: [
               Icon(
-                  present
-                      ? Icons.check_circle_rounded
-                      : Icons.cancel_rounded,
+                  present ? Icons.check_circle_rounded : Icons.cancel_rounded,
                   size: 15,
-                  color: present
-                      ? const Color(0xFF2E7D32)
-                      : Colors.red),
+                  color: present ? const Color(0xFF2E7D32) : Colors.red),
               const SizedBox(width: 5),
               Text(
                 present ? "حضور" : "غياب",
                 style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: present
-                        ? const Color(0xFF2E7D32)
-                        : Colors.red),
+                    color: present ? const Color(0xFF2E7D32) : Colors.red),
               ),
               const Spacer(),
               Text(dateStr,
-                  style: const TextStyle(
-                      fontSize: 10, color: Colors.grey)),
+                  style: const TextStyle(fontSize: 10, color: Colors.grey)),
             ],
           ),
           if (present) ...[
@@ -637,8 +733,8 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(rec["note"],
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.grey),
+                        style:
+                        const TextStyle(fontSize: 11, color: Colors.grey),
                         overflow: TextOverflow.ellipsis),
                   ),
                 ],
@@ -650,10 +746,11 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
     );
   }
 
-  // ===== ديالوج التعليق =====
+  // ═══════════════════════════════════
+  // ديالوج التعليق
+  // ═══════════════════════════════════
   void _showNoteDialog(int i) {
-    final noteCtrl   =
-    TextEditingController(text: _newEntries[i]["note"]);
+    final noteCtrl   = TextEditingController(text: _newEntries[i]["note"]);
     final pointsCtrl = TextEditingController(
         text: _newEntries[i]["points"]?.toString() ?? "");
 
@@ -691,12 +788,13 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
                   backgroundColor: kDarkBlue,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8))),
-              onPressed: () {
+              onPressed: () async {
                 setState(() {
                   _newEntries[i]["note"]   = noteCtrl.text;
                   _newEntries[i]["points"] = pointsCtrl.text;
                 });
-                Navigator.pop(context);
+                await _saveToCache();
+                if (mounted) Navigator.pop(context);
               },
               child: const Text("حفظ",
                   style: TextStyle(color: Colors.white)),
@@ -738,22 +836,84 @@ class _StudentAttendanceScreenState extends State<StudentAttendanceScreen> {
   }
 }
 
-// ========== Widgets مساعدة ==========
+// ══════════════════════════════════════════════════════════
+// Widgets مساعدة
+// ══════════════════════════════════════════════════════════
 
-class _HCell extends StatelessWidget {
-  final String text;
-  const _HCell(this.text);
+/// StatefulWidget مستقل لكل dropdown مع محاذاة مركزية مطابقة للهيدر
+class _IndependentDrop extends StatefulWidget {
+  final String? value;
+  final List<String> options;
+  final bool enabled;
+  final ValueChanged<String?> onChanged;
+
+  const _IndependentDrop({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.enabled,
+    required this.onChanged,
+  });
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Text(text,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 11,
-            fontFamily: 'Almarai')),
-  );
+  State<_IndependentDrop> createState() => _IndependentDropState();
+}
+
+class _IndependentDropState extends State<_IndependentDrop> {
+  String? _localValue;
+
+  @override
+  void initState() {
+    super.initState();
+    _localValue = widget.value;
+  }
+
+  @override
+  void didUpdateWidget(_IndependentDrop oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value && _localValue == oldWidget.value) {
+      setState(() => _localValue = widget.value);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final safeVal = widget.options.contains(_localValue) ? _localValue : null;
+
+    return Container(
+      alignment: Alignment.center, // ✅ يضمن محاذاة الـ dropdown تحت الهيدر بالظبط
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: safeVal,
+          isExpanded: true,
+          hint: Text(
+            "—",
+            textAlign: TextAlign.center, // ✅ الـ hint متمركز
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+          ),
+          style: const TextStyle(
+              fontSize: 11,
+              color: Color(0xFF1A2340),
+              fontFamily: 'Almarai'),
+          iconSize: 14,
+          alignment: Alignment.center, // ✅ محاذاة القيمة المختارة في المنتصف
+          onChanged: widget.enabled
+              ? (val) {
+            setState(() => _localValue = val);
+            widget.onChanged(val);
+          }
+              : null,
+          items: widget.options
+              .map((e) => DropdownMenuItem<String>(
+            value: e,
+            alignment: Alignment.center, // ✅ العناصر متمركزة
+            child: Text(e, textAlign: TextAlign.center),
+          ))
+              .toList(),
+        ),
+      ),
+    );
+  }
 }
 
 class _Chip extends StatelessWidget {
@@ -765,8 +925,7 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Flexible(
     child: Container(
-      padding:
-      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(8),

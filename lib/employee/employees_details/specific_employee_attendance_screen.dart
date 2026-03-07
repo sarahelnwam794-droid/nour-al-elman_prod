@@ -3,43 +3,38 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'dart:ui' as ui;
+import 'package:shared_preferences/shared_preferences.dart';
 
 // --- Models ---
-class EmployeeAttendanceModel {
-  bool? status;
-  String? message;
-  List<AttendanceRecord>? data;
-
-  EmployeeAttendanceModel({this.status, this.message, this.data});
-
-  EmployeeAttendanceModel.fromJson(Map<String, dynamic> json) {
-    status = json['status'];
-    message = json['message'];
-    if (json['data'] != null) {
-      data = <AttendanceRecord>[];
-      json['data'].forEach((v) {
-        data!.add(AttendanceRecord.fromJson(v));
-      });
-    }
-  }
-}
-
 class AttendanceRecord {
   String? date;
   String? checkInTime;
   String? checkOutTime;
   String? workingHours;
   String? locationName;
+  String? userName;
+  String? checkType;
 
-  AttendanceRecord({this.date, this.checkInTime, this.checkOutTime, this.workingHours, this.locationName});
+  AttendanceRecord({
+    this.date,
+    this.checkInTime,
+    this.checkOutTime,
+    this.workingHours,
+    this.locationName,
+    this.userName,
+    this.checkType,
+  });
 
-  AttendanceRecord.fromJson(Map<String, dynamic> json) {
-    date = json['date'];
-    checkInTime = json['checkInTime'];
-    checkOutTime = json['checkOutTime'];
-    workingHours = json['workingHours'];
-    locationName = json['locationName'];
-  }
+  factory AttendanceRecord.fromJson(Map<String, dynamic> json) =>
+      AttendanceRecord(
+        date: json['date'],
+        checkInTime: json['checkInTime'],
+        checkOutTime: json['checkOutTime'],
+        workingHours: json['workingHours'],
+        locationName: json['locationName'],
+        userName: json['userName'],
+        checkType: json['checkType'],
+      );
 }
 
 // --- Screen ---
@@ -50,14 +45,16 @@ class SpecificEmployeeAttendanceScreen extends StatefulWidget {
   const SpecificEmployeeAttendanceScreen({
     super.key,
     required this.employeeId,
-    required this.employeeName
+    required this.employeeName,
   });
 
   @override
-  State<SpecificEmployeeAttendanceScreen> createState() => _SpecificEmployeeAttendanceScreenState();
+  State<SpecificEmployeeAttendanceScreen> createState() =>
+      _SpecificEmployeeAttendanceScreenState();
 }
 
-class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAttendanceScreen> {
+class _SpecificEmployeeAttendanceScreenState
+    extends State<SpecificEmployeeAttendanceScreen> {
   bool _isLoading = true;
   Map<String, List<AttendanceRecord>> _groupedAttendance = {};
   List<String> _availableMonths = [];
@@ -69,17 +66,21 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
     _fetchAttendanceLogs();
   }
 
-  DateTime? _parseServerDate(String? dateStr) {
+  DateTime? _parseDate(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return null;
     try {
       return DateTime.parse(dateStr);
-    } catch (e) {
-      try {
-        return DateFormat("MM/dd/yyyy").parse(dateStr);
-      } catch (e2) {
-        return null;
-      }
-    }
+    } catch (_) {}
+    try {
+      return DateFormat("M/d/yyyy").parse(dateStr);
+    } catch (_) {}
+    try {
+      return DateFormat("MM/dd/yyyy").parse(dateStr);
+    } catch (_) {}
+    try {
+      return DateFormat("M/dd/yyyy").parse(dateStr);
+    } catch (_) {}
+    return null;
   }
 
   Future<void> _fetchAttendanceLogs() async {
@@ -87,29 +88,76 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
     setState(() => _isLoading = true);
 
     try {
-      final url = 'https://nour-al-eman.runasp.net/api/Locations/GetAll-employee-attendance-ByEmpId?EmpId=${widget.employeeId}';
-      final response = await http.get(Uri.parse(url));
+      List<AttendanceRecord> allRecords = [];
 
-      if (response.statusCode == 200) {
-        final attendanceModel = EmployeeAttendanceModel.fromJson(json.decode(response.body));
-        _processData(attendanceModel.data ?? []);
+      // ── 1. جيب من السيرفر ──
+      try {
+        final url =
+            'https://nourelman.runasp.net/api/Locations/GetAll-employee-attendance-ByEmpId?EmpId=${widget.employeeId}';
+        final prefs2 = await SharedPreferences.getInstance();
+        final String token2 = prefs2.getString('user_token') ?? '';
+        final response = await http.get(
+          Uri.parse(url),
+          headers: {
+            if (token2.isNotEmpty && token2 != 'no_token')
+              'Authorization': 'Bearer $token2',
+          },
+        );
+        if (response.statusCode == 200) {
+          final decoded = json.decode(response.body);
+          final List<dynamic> data = decoded['data'] ?? [];
+          for (var item in data) {
+            allRecords.add(AttendanceRecord.fromJson(item));
+          }
+        }
+      } catch (e) {
+        debugPrint("Server fetch error: $e");
       }
+
+      // ── 2. جيب السجلات المحلية ──
+      // ✅ مهم: السجلات المحلية بتبقى أدق لأنها بتحفظ كل بصمة لوحدها
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final localKey = 'local_attendance_${widget.employeeId}';
+        final localJson = prefs.getString(localKey);
+        if (localJson != null) {
+          final List<dynamic> localList = jsonDecode(localJson);
+          for (var item in localList) {
+            allRecords.add(AttendanceRecord(
+              date: item['date'],
+              checkInTime: item['checkInTime'],
+              checkOutTime: item['checkOutTime'],
+              workingHours: item['workingHours'],
+              locationName: item['locationName'],
+              userName: item['userName'],
+              checkType: item['checkType'],
+            ));
+          }
+        }
+      } catch (e) {
+        debugPrint("Local fetch error: $e");
+      }
+
+      _processData(allRecords);
     } catch (e) {
-      debugPrint("Error fetching data: $e");
+      debugPrint("Error: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   void _processData(List<AttendanceRecord> rawData) {
+    final validData =
+    rawData.where((r) => _parseDate(r.date) != null).toList();
+    // رتب تنازلياً
+    validData.sort((a, b) =>
+        _parseDate(b.date)!.compareTo(_parseDate(a.date)!));
+
+    // ✅ كل record يظهر لوحده - مش بنحذف التكرار
     Map<String, List<AttendanceRecord>> groups = {};
-    List<AttendanceRecord> validData = rawData.where((item) => _parseServerDate(item.date) != null).toList();
-
-    validData.sort((a, b) => _parseServerDate(b.date)!.compareTo(_parseServerDate(a.date)!));
-
     for (var entry in validData) {
-      DateTime date = _parseServerDate(entry.date)!;
-      String monthYear = DateFormat('MMMM yyyy', 'ar').format(date);
+      final date = _parseDate(entry.date)!;
+      final monthYear = DateFormat('MMMM yyyy', 'ar').format(date);
       if (!groups.containsKey(monthYear)) groups[monthYear] = [];
       groups[monthYear]!.add(entry);
     }
@@ -127,9 +175,9 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
       textDirection: ui.TextDirection.rtl,
       child: Scaffold(
         backgroundColor: Colors.white,
-        // تم حذف الـ AppBar بناءً على طلبك
         body: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: Color(0xFF1976D2)))
+            ? const Center(
+            child: CircularProgressIndicator(color: Color(0xFF1976D2)))
             : _availableMonths.isEmpty
             ? _buildEmptyState()
             : Column(
@@ -145,32 +193,43 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
 
   Widget _buildMonthNavigator() {
     return Container(
-      width: double.infinity, // كبرنا العرض
+      width: double.infinity,
       margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16), // زيادة الحواف الداخلية
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 4)),
         ],
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween, // توزيع العناصر على الأطراف
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.black87),
+            icon: const Icon(Icons.arrow_back_ios_new,
+                size: 18, color: Colors.black87),
             onPressed: _currentMonthIndex > 0
-                ? () => setState(() => _currentMonthIndex--) : null,
+                ? () => setState(() => _currentMonthIndex--)
+                : null,
           ),
           Text(
             _availableMonths[_currentMonthIndex],
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'Almarai'),
+            style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Almarai'),
           ),
           IconButton(
-            icon: const Icon(Icons.arrow_forward_ios, size: 18, color: Colors.black87),
-            onPressed: _currentMonthIndex < _availableMonths.length - 1 ? () => setState(() => _currentMonthIndex++) : null,
+            icon: const Icon(Icons.arrow_forward_ios,
+                size: 18, color: Colors.black87),
+            onPressed: _currentMonthIndex < _availableMonths.length - 1
+                ? () => setState(() => _currentMonthIndex++)
+                : null,
           ),
         ],
       ),
@@ -198,25 +257,26 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
 
   Widget _headerItem(String label) {
     return Expanded(
-      child: Text(
-        label,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-            fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 13, fontFamily: 'Almarai'),
-      ),
+      child: Text(label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.grey,
+              fontSize: 13,
+              fontFamily: 'Almarai')),
     );
   }
 
   Widget _buildAttendanceList() {
-    String currentMonth = _availableMonths[_currentMonthIndex];
-    List<AttendanceRecord> logs = _groupedAttendance[currentMonth]!;
+    final currentMonth = _availableMonths[_currentMonthIndex];
+    final logs = _groupedAttendance[currentMonth]!;
 
     return ListView.builder(
       padding: const EdgeInsets.only(top: 10),
       itemCount: logs.length,
       itemBuilder: (context, index) {
         final log = logs[index];
-        DateTime? date = _parseServerDate(log.date);
+        final date = _parseDate(log.date);
 
         return Container(
           padding: const EdgeInsets.symmetric(vertical: 15),
@@ -230,14 +290,20 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
                 child: Column(
                   children: [
                     Text(
-                      date != null ? DateFormat('EEEE', 'ar').format(date) : "",
+                      date != null
+                          ? DateFormat('EEEE', 'ar').format(date)
+                          : "",
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'Almarai'),
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Almarai'),
                     ),
                     Text(
                       date != null ? DateFormat('MM/dd').format(date) : "",
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      style: const TextStyle(
+                          fontSize: 11, color: Colors.grey),
                     ),
                   ],
                 ),
@@ -246,21 +312,30 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
                 child: Text(
                   log.checkInTime ?? "--",
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
+                  style: const TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12),
                 ),
               ),
               Expanded(
                 child: Text(
                   log.checkOutTime ?? "--",
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12),
+                  style: const TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12),
                 ),
               ),
               Expanded(
                 child: Text(
                   log.workingHours ?? "--",
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF2E3542)),
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2E3542)),
                 ),
               ),
             ],
@@ -275,11 +350,10 @@ class _SpecificEmployeeAttendanceScreenState extends State<SpecificEmployeeAtten
       child: Text(
         "لا توجد بيانات حضور",
         style: TextStyle(
-          color: Colors.grey,
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-          fontFamily: 'Almarai',
-        ),
+            color: Colors.grey,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            fontFamily: 'Almarai'),
       ),
     );
   }

@@ -38,53 +38,40 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> with SingleTick
     _tabController.dispose();
     super.dispose();
   }
-
   Future<void> _fetchStaffInfo() async {
     setState(() {
       isLoadingInfo = true;
       errorMessage = "";
     });
-
     try {
       final prefs = await SharedPreferences.getInstance();
       String? token = prefs.getString('token');
 
-      // ابحثي عن هذا السطر وقومي بتعديله
+      // تم تعديل الرابط هنا ليكون مطابقاً للرابط الصحيح وبدون شرطة
       final response = await http.get(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetById?id=${widget.staffId}'), // تم تغيير Staff إلى Employee
+        Uri.parse('https://nourelman.runasp.net/api/Employee/GetById?id=${widget.staffId}'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
       );
-      debugPrint("Full Response Body: ${response.body}");
 
       if (response.statusCode == 200) {
-        final Map<String, dynamic> decoded = jsonDecode(response.body);
+        final data = jsonDecode(response.body);
         setState(() {
-          // حل مشكلة النوع Map<dynamic, dynamic> عبر cast صريح
-          if (decoded.containsKey('data') && decoded['data'] != null) {
-            staffData = Map<String, dynamic>.from(decoded['data']);
-          } else {
-            staffData = Map<String, dynamic>.from(decoded);
-          }
-          isLoadingInfo = false;
-        });
-      } else if (response.statusCode == 404) {
-        setState(() {
-          errorMessage = "خطأ 404: الرابط غير موجود أو الموظف غير مسجل";
+          // تأكدي من الوصول للحقل 'data' بشكل صحيح
+          staffData = data['data'];
           isLoadingInfo = false;
         });
       } else {
         setState(() {
-          errorMessage = "خطأ في السيرفر: ${response.statusCode}";
+          errorMessage = "فشل في جلب البيانات: ${response.statusCode}";
           isLoadingInfo = false;
         });
       }
     } catch (e) {
-      debugPrint("Error: $e");
       setState(() {
-        errorMessage = "فشل في الاتصال بالشبكة";
+        errorMessage = "حدث خطأ في الاتصال: $e";
         isLoadingInfo = false;
       });
     }
@@ -190,7 +177,7 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> with SingleTick
       padding: const EdgeInsets.all(16),
       children: [
         // الكارت الأول: بيانات الموظف
-        _buildSectionCard("بيانات الموظف", Icons.badge_outlined, [
+        _buildSectionCard("بيانات المعلم", Icons.badge_outlined, [
           _infoRow("اسم المعلم :", staffData!['name'] ?? "---"),
           _infoRow("كود المعلم :", staffData!['id']?.toString() ?? "---"),
           _infoRow("المكتب التابع له :", staffData!['loc']?['name'] ?? "---"),
@@ -270,9 +257,18 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> with SingleTick
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13, fontFamily: 'Almarai')),
-          Text(value, style: const TextStyle(color: kTextDark, fontWeight: FontWeight.bold, fontSize: 13, fontFamily: 'Almarai')),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              value,
+              style: const TextStyle(color: kTextDark, fontWeight: FontWeight.bold, fontSize: 13, fontFamily: 'Almarai'),
+              textAlign: TextAlign.left,
+              overflow: TextOverflow.visible,
+            ),
+          ),
         ],
       ),
     );

@@ -1,63 +1,174 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:intl/intl.dart';
+import 'dart:ui' as ui;
+import 'package:shared_preferences/shared_preferences.dart';
 
+// ───────── Model ─────────
+class _AttendanceRecord {
+  String? date;
+  String? checkInTime;
+  String? checkOutTime;
+  String? workingHours;
+  String? locationName;
+  String? userName;
+  String? checkType;
+
+  _AttendanceRecord({
+    this.date,
+    this.checkInTime,
+    this.checkOutTime,
+    this.workingHours,
+    this.locationName,
+    this.userName,
+    this.checkType,
+  });
+
+  factory _AttendanceRecord.fromJson(Map<String, dynamic> json) => _AttendanceRecord(
+    date: json['date'],
+    checkInTime: json['checkInTime'],
+    checkOutTime: json['checkOutTime'],
+    workingHours: json['workingHours'],
+    locationName: json['locationName'],
+    userName: json['userName'],
+    checkType: json['checkType'],
+  );
+}
+
+// ───────── Tab Widget ─────────
 class EmployeeAttendanceTab extends StatefulWidget {
   final int empId;
 
   const EmployeeAttendanceTab({super.key, required this.empId});
 
   @override
-  _EmployeeAttendanceTabState createState() => _EmployeeAttendanceTabState();
+  State<EmployeeAttendanceTab> createState() => _EmployeeAttendanceTabState();
 }
 
 class _EmployeeAttendanceTabState extends State<EmployeeAttendanceTab> {
-  List<dynamic> _attendanceList = [];
   bool _isLoading = true;
-  int? _expandedIndex;
+  Map<String, List<_AttendanceRecord>> _groupedByMonth = {};
+  List<String> _availableMonths = [];
+  int _currentMonthIndex = 0;
 
-  // الألوان المستخدمة في التصميم
   static const Color kPrimaryBlue = Color(0xFF1976D2);
-  static const Color kHeaderGrey = Color(0xFFF9FAFB);
-  static const Color kSuccessGreen = Color(0xFF2E7D32);
-  static const Color kDangerRed = Color(0xFFD32F2F);
 
   @override
   void initState() {
     super.initState();
-    _fetchAttendance();
+    _fetchAttendanceLogs();
   }
 
-  Future<void> _fetchAttendance() async {
-    setState(() => _isLoading = true);
+  DateTime? _parseDate(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return null;
     try {
-      final response = await http.get(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Locations/GetAll-employee-attendance-ByEmpId?EmpId=${widget.empId}'),
-      );
+      return DateTime.parse(dateStr);
+    } catch (_) {}
+    try {
+      return DateFormat("M/d/yyyy").parse(dateStr);
+    } catch (_) {}
+    try {
+      return DateFormat("MM/dd/yyyy").parse(dateStr);
+    } catch (_) {}
+    try {
+      return DateFormat("M/dd/yyyy").parse(dateStr);
+    } catch (_) {}
+    return null;
+  }
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        // التحقق من وجود بيانات في الـ data field
-        setState(() {
-          _attendanceList = data['data'] ?? [];
-          _isLoading = false;
-        });
-      } else {
-        setState(() => _isLoading = false);
+  Future<void> _fetchAttendanceLogs() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
+    try {
+      List<_AttendanceRecord> allRecords = [];
+
+      // ── 1. جيب السجلات المحلية أولاً (هي الأدق والأحدث) ──
+      // ✅ هذا هو المفتاح الصح - نفس المفتاح اللي بتحفظه شاشة البصمة
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final localKey = 'local_attendance_${widget.empId}';
+        final localJson = prefs.getString(localKey);
+        if (localJson != null) {
+          final List<dynamic> localList = jsonDecode(localJson);
+          for (var item in localList) {
+            allRecords.add(_AttendanceRecord(
+              date: item['date'],
+              checkInTime: item['checkInTime'],
+              checkOutTime: item['checkOutTime'],
+              workingHours: item['workingHours'],
+              locationName: item['locationName'],
+              userName: item['userName'],
+              checkType: item['checkType'],
+            ));
+          }
+        }
+      } catch (e) {
+        debugPrint("Local fetch error: $e");
       }
+
+      // ── 2. جيب من السيرفر وأضف اللي مش موجود محلياً ──
+      // ✅ endpoint الصح للـ check-in/check-out
+      try {
+        final url =
+            'https://nourelman.runasp.net/api/Locations/GetAll-employee-attendance-ByEmpId?EmpId=${widget.empId}';
+        final prefs2 = await SharedPreferences.getInstance();
+        final String token2 = prefs2.getString('user_token') ?? '';
+        final response = await http.get(
+          Uri.parse(url),
+          headers: {
+            if (token2.isNotEmpty && token2 != 'no_token')
+              'Authorization': 'Bearer $token2',
+          },
+        );
+        if (response.statusCode == 200) {
+          final decoded = json.decode(response.body);
+          final List<dynamic> data = decoded['data'] ?? [];
+
+          // عمل set من التواريخ الموجودة محلياً
+          final Set<String> localDates = {};
+          for (var r in allRecords) {
+            if (r.date != null) localDates.add(r.date!);
+          }
+
+          for (var item in data) {
+            final serverRecord = _AttendanceRecord.fromJson(item);
+            if (!localDates.contains(serverRecord.date)) {
+              allRecords.add(serverRecord);
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint("Server fetch error: $e");
+      }
+
+      _processData(allRecords);
     } catch (e) {
-      setState(() => _isLoading = false);
+      debugPrint("Error: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  String _mapNoteToText(int? noteId) {
-    switch (noteId) {
-      case 1: return "ممتاز";
-      case 2: return "جيد جداً";
-      case 3: return "جيد";
-      case 5: return "ضعيف";
-      default: return "غير محدد";
+  void _processData(List<_AttendanceRecord> rawData) {
+    final validData = rawData.where((r) => _parseDate(r.date) != null).toList();
+    validData.sort((a, b) => _parseDate(b.date)!.compareTo(_parseDate(a.date)!));
+
+    // ✅ كل record يظهر على حدة
+    Map<String, List<_AttendanceRecord>> groups = {};
+    for (var entry in validData) {
+      final date = _parseDate(entry.date)!;
+      final monthYear = DateFormat('MMMM yyyy', 'ar').format(date);
+      if (!groups.containsKey(monthYear)) groups[monthYear] = [];
+      groups[monthYear]!.add(entry);
     }
+
+    setState(() {
+      _groupedByMonth = groups;
+      _availableMonths = groups.keys.toList();
+      _currentMonthIndex = 0;
+    });
   }
 
   @override
@@ -66,125 +177,90 @@ class _EmployeeAttendanceTabState extends State<EmployeeAttendanceTab> {
       return const Center(child: CircularProgressIndicator(color: kPrimaryBlue));
     }
 
-    if (_attendanceList.isEmpty) {
-      return const Center(
-        child: Text(
-          "لا توجد بيانات!",
-          style: TextStyle(
-            color: kDangerRed,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'Almarai',
-          ),
+    if (_availableMonths.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.event_busy, size: 80, color: Colors.grey[300]),
+            const SizedBox(height: 16),
+            const Text(
+              "لا توجد بيانات حضور",
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'Almarai'),
+            ),
+          ],
         ),
       );
     }
 
     return Directionality(
-      textDirection: TextDirection.rtl,
+      textDirection: ui.TextDirection.rtl,
       child: Column(
         children: [
-          // الهيدر - مطابق للويب
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            decoration: const BoxDecoration(
-              color: kHeaderGrey,
-              border: Border(bottom: BorderSide(color: Color(0xFFEEEEEE))),
-            ),
-            child: Row(
-              children: [
-                _buildHeaderCell("موعد الحلقة", 2),
-                _buildHeaderCell("الحضور", 1),
-                _buildHeaderCell("حفظ قديم", 2),
-                _buildHeaderCell("حفظ جديد", 2),
-                _buildHeaderCell("تعليق", 2),
-              ],
-            ),
+          _buildMonthNavigator(),
+          _buildTableHeader(),
+          Expanded(child: _buildAttendanceList()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMonthNavigator() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.black87),
+            onPressed: _currentMonthIndex > 0
+                ? () => setState(() => _currentMonthIndex--)
+                : null,
           ),
-
-          Expanded(
-            child: ListView.separated(
-              itemCount: _attendanceList.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFEEEEEE)),
-              itemBuilder: (context, index) {
-                final item = _attendanceList[index];
-                bool isExpanded = _expandedIndex == index;
-
-                return Column(
-                  children: [
-                    InkWell(
-                      onTap: () => setState(() => _expandedIndex = isExpanded ? null : index),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 8),
-                        child: Row(
-                          children: [
-                            // 1. التاريخ
-                            Expanded(flex: 2, child: Text(item['createDate']?.split('T')[0] ?? '', textAlign: TextAlign.center, style: const TextStyle(fontSize: 11))),
-
-                            // 2. حالة الحضور
-                            Expanded(
-                              flex: 1,
-                              child: Text(
-                                item['isPresent'] == true ? "حضور" : "غياب",
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: item['isPresent'] == true ? kSuccessGreen : kDangerRed,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-
-                            // 3. الملاحظات (Mapping)
-                            Expanded(flex: 2, child: Text(_mapNoteToText(item['oldAttendanceNote']), textAlign: TextAlign.center, style: const TextStyle(fontSize: 11))),
-                            Expanded(flex: 2, child: Text(_mapNoteToText(item['newAttendanceNote']), textAlign: TextAlign.center, style: const TextStyle(fontSize: 11))),
-
-                            // 4. زر التفاصيل
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                isExpanded ? "إخفاء" : "عرض التعليق",
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: isExpanded ? kDangerRed : kPrimaryBlue,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // جزء التعليق المخفي
-                    if (isExpanded)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        color: Colors.blue.withOpacity(0.05),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                "التعليق: ${item['note'] ?? 'لا يوجد تعليق'}",
-                                style: const TextStyle(color: kPrimaryBlue, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Almarai'),
-                              ),
-                            ),
-                            Text(
-                              "النقاط: ${item['points'] ?? 0}",
-                              style: const TextStyle(color: kSuccessGreen, fontWeight: FontWeight.bold, fontSize: 12, fontFamily: 'Almarai'),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                );
-              },
-            ),
+          Text(
+            _availableMonths[_currentMonthIndex],
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.bold, fontFamily: 'Almarai'),
           ),
+          IconButton(
+            icon: const Icon(Icons.arrow_forward_ios, size: 18, color: Colors.black87),
+            onPressed: _currentMonthIndex < _availableMonths.length - 1
+                ? () => setState(() => _currentMonthIndex++)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTableHeader() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          _buildHeaderCell("اليوم", 2),
+          _buildHeaderCell("حضور", 2),
+          _buildHeaderCell("إنصراف", 2),
+          _buildHeaderCell("ساعات", 1),
         ],
       ),
     );
@@ -196,8 +272,91 @@ class _EmployeeAttendanceTabState extends State<EmployeeAttendanceTab> {
       child: Text(
         label,
         textAlign: TextAlign.center,
-        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.black87, fontFamily: 'Almarai'),
+        style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+            color: Colors.black87,
+            fontFamily: 'Almarai'),
       ),
+    );
+  }
+
+  Widget _buildAttendanceList() {
+    final currentMonth = _availableMonths[_currentMonthIndex];
+    final logs = _groupedByMonth[currentMonth]!;
+
+    return ListView.builder(
+      padding: const EdgeInsets.only(top: 8),
+      itemCount: logs.length,
+      itemBuilder: (context, index) {
+        final log = logs[index];
+        final date = _parseDate(log.date);
+
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          margin: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: Colors.grey.shade100)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: Column(
+                  children: [
+                    Text(
+                      date != null ? DateFormat('EEEE', 'ar').format(date) : "",
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Almarai'),
+                    ),
+                    Text(
+                      date != null ? DateFormat('MM/dd').format(date) : "",
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  log.checkInTime ?? "--",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12),
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: Text(
+                  log.checkOutTime ?? "--",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12),
+                ),
+              ),
+              Expanded(
+                flex: 1,
+                child: Text(
+                  log.workingHours ?? "--",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF2E3542)),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

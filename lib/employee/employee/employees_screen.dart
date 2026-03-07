@@ -27,6 +27,16 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
     _fetchTeachersData();
   }
 
+  // بتتحدث تلقائياً كل ما ترجعي لشاشة المعلمين
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && route.isCurrent) {
+      _fetchTeachersData();
+    }
+  }
+
   // --- جلب بيانات المعلمين ---
   Future<void> _fetchTeachersData() async {
     setState(() => _isLoading = true);
@@ -34,7 +44,8 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       final prefs = await SharedPreferences.getInstance();
       String? token = prefs.getString('token');
 
-      final url = Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetWithType/?type=1');
+      final url = Uri.parse('https://nourelman.runasp.net/api/Employee/GetWithType/?type=1')
+      ;
 
       final response = await http.get(url, headers: {
         'Authorization': 'Bearer $token',
@@ -76,7 +87,8 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       String? token = prefs.getString('token');
 
       // بناء الرابط مع الـ Query Parameters كما في الصورة (id & type)
-      final url = Uri.parse('https://nour-al-eman.runasp.net/api/Account/DeActivate?id=$id&type=1');
+      final url =Uri.parse('https://nourelman.runasp.net/api/Account/DeActivate?id=$id&type=1')
+      ;
 
       final response = await http.post(
         url,
@@ -110,7 +122,8 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       String? token = prefs.getString('token');
 
       final response = await http.post(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Student/ResetPassword'),
+        Uri.parse('https://nourelman.runasp.net/api/Student/ResetPassword')
+        ,
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -180,64 +193,67 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: kPrimaryBlue))
-          : Padding(
-        padding: const EdgeInsets.all(12),
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SingleChildScrollView(
-              child: Table(
-                columnWidths: const {
-                  0: FlexColumnWidth(1), // رقم #
-                  1: FlexColumnWidth(4), // الاسم
-                  2: FlexColumnWidth(2), // بيانات
-                  3: FlexColumnWidth(2), // السر
-                  4: FlexColumnWidth(1.5), // حذف
-                },
-                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                children: [
-                  TableRow(
-                    decoration: BoxDecoration(color: Colors.grey[100]),
-                    children: [
-                      _buildHeaderCell("#"),
-                      _buildHeaderCell("الاسم", align: TextAlign.right),
-                      _buildHeaderCell("بيانات"),
-                      _buildHeaderCell("كلمة المرور"),
-                      _buildHeaderCell("حذف"),
-                    ],
-                  ),
-                  ..._filteredEmployees.asMap().entries.map((entry) {
-                    int index = entry.key;
-                    var teacher = entry.value;
-                    return TableRow(
-                      decoration: BoxDecoration(
-                        border: Border(bottom: BorderSide(color: Colors.grey[200]!, width: 0.5)),
-                      ),
+          : RefreshIndicator(
+        color: kPrimaryBlue,
+        onRefresh: _fetchTeachersData,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: Table(
+                  columnWidths: const {
+                    0: FlexColumnWidth(1),
+                    1: FlexColumnWidth(4),
+                    2: FlexColumnWidth(2),
+                    3: FlexColumnWidth(2),
+                    4: FlexColumnWidth(1.5),
+                  },
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  children: [
+                    TableRow(
+                      decoration: BoxDecoration(color: Colors.grey[100]),
                       children: [
-                        _buildDataCell("${index + 1}"),
-                        _buildDataCell(teacher.name ?? "---", align: TextAlign.right, isBold: true),
-                        _buildActionCell(Icons.person_outline, Colors.blue[800]!, () {
-                          Navigator.push(context, MaterialPageRoute(
-                            builder: (c) => StaffDetailsScreen(staffId: teacher.id!, staffName: teacher.name!),
-                          ));
-                        }),
-                        // زر تعيين كلمة السر
-                        _buildActionCell(Icons.lock_open_rounded, Colors.blue[400]!, () {
-                          _showResetPasswordDialog(teacher.id!, teacher.name ?? "");
-                        }),
-                        // زر الحذف
-                        _buildActionCell(Icons.delete_outline, Colors.red[400]!, () {
-                          _showDeleteConfirmDialog(teacher.id!);
-                        }),
+                        _buildHeaderCell("#"),
+                        _buildHeaderCell("الاسم", align: TextAlign.right),
+                        _buildHeaderCell("بيانات"),
+                        _buildHeaderCell("كلمة المرور"),
+                        _buildHeaderCell("حذف"),
                       ],
-                    );
-                  }).toList(),
-                ],
+                    ),
+                    ..._filteredEmployees.asMap().entries.map((entry) {
+                      int index = entry.key;
+                      var teacher = entry.value;
+                      return TableRow(
+                        decoration: BoxDecoration(
+                          border: Border(bottom: BorderSide(color: Colors.grey[200]!, width: 0.5)),
+                        ),
+                        children: [
+                          _buildDataCell("${index + 1}"),
+                          _buildDataCell(teacher.name ?? "---", align: TextAlign.right, isBold: true),
+                          _buildActionCell(Icons.person_outline, Colors.blue[800]!, () {
+                            Navigator.push(context, MaterialPageRoute(
+                              builder: (c) => StaffDetailsScreen(staffId: teacher.id!, staffName: teacher.name!),
+                            ));
+                          }),
+                          _buildActionCell(Icons.lock_open_rounded, Colors.blue[400]!, () {
+                            _showResetPasswordDialog(teacher.id!, teacher.name ?? "");
+                          }),
+                          _buildActionCell(Icons.delete_outline, Colors.red[400]!, () {
+                            _showDeleteConfirmDialog(teacher.id!);
+                          }),
+                        ],
+                      );
+                    }).toList(),
+                  ],
+                ),
               ),
             ),
           ),

@@ -64,7 +64,8 @@ class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
   Future<void> _fetchEmployeeData() async {
     try {
       final response = await http.get(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetById?id=${widget.empId}'),
+        Uri.parse('https://nourelman.runasp.net/api/Employee/GetById?id=${widget.empId}')
+        ,
       );
 
       if (response.statusCode == 200) {
@@ -153,7 +154,7 @@ class _EditEmployeeScreenState extends State<EditEmployeeScreen> {
       };
 
       final response = await http.put(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Employee/Update'), //
+        Uri.parse('https://nourelman.runasp.net/api/Employee/Update'), //
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',

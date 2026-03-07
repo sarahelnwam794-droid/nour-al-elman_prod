@@ -34,8 +34,10 @@ class _StudentTasksAbsenceScreenState extends State<StudentTasksAbsenceScreen> {
 
   Future<void> _loadData() async {
     try {
-      final resLevels = await http.get(Uri.parse("https://nour-al-eman.runasp.net/api/Level/Getall"));
-      final resStudents = await http.get(Uri.parse("https://nour-al-eman.runasp.net/api/Student/Getall"));
+      final resLevels = await http.get(Uri.parse("https://nourelman.runasp.net/api/Level/Getall")
+      );
+      final resStudents = await http.get(Uri.parse("https://nourelman.runasp.net/api/Student/Getall")
+      );
 
       setState(() {
         levels = (json.decode(utf8.decode(resLevels.bodyBytes))['data'] as List).map((e) => LevelModel.fromJson(e)).toList();
@@ -52,7 +54,8 @@ class _StudentTasksAbsenceScreenState extends State<StudentTasksAbsenceScreen> {
     setState(() => isSubmitting = true);
     try {
       final response = await http.post(
-        Uri.parse("https://nour-al-eman.runasp.net/api/${widget.apiEndpoint}"),
+        Uri.parse("https://nourelman.runasp.net/api/${widget.apiEndpoint}")
+,
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
           "levelId": selectedLevel?.id,

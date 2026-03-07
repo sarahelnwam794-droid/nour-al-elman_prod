@@ -100,12 +100,19 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
       // لو عندنا numeric id استخدمه
       if (numericId != null && numericId.isNotEmpty && numericId != "null" && numericId != "0") {
         final response = await http.get(
-            Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetById?id=$numericId')
+            Uri.parse('https://nourelman.runasp.net/api/Employee/GetById?id=$numericId')
         );
         debugPrint("📥 Status: ${response.statusCode} | Body: ${response.body}");
         if (response.statusCode == 200) {
           final decoded = jsonDecode(response.body);
           if (mounted) setState(() => teacherData = TeacherModel.fromJson(decoded).data);
+          // ✅ احفظ locId عشان شاشة الحضور تستخدمه
+          final locId = decoded['data']?['locId'];
+          if (locId != null) {
+            final p = await SharedPreferences.getInstance();
+            await p.setInt('user_loc_id', locId as int);
+            debugPrint("✅ Teacher Saved user_loc_id: $locId");
+          }
         }
       }
       // لو مفيش numeric id، استخدم بيانات الـ loginData مباشرة
@@ -139,7 +146,7 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
         return;
       }
 
-      final response = await http.get(Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetSessionRecord?emp_id=$id'));
+      final response = await http.get(Uri.parse('https://nourelman.runasp.net/api/Employee/GetSessionRecord?emp_id=$id'));
       if (response.statusCode == 200) {
         setState(() => _sessions = sessionRecordFromJson(response.body));
       }
@@ -469,7 +476,13 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
               style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, elevation: 0),
               onPressed: () async {
                 final prefs = await SharedPreferences.getInstance();
-                await prefs.clear();
+                // ✅ احتفظ بسجلات الحضور المحلية - امسح بس بيانات الـ session
+                final allKeys = prefs.getKeys();
+                for (final key in allKeys) {
+                  if (!key.startsWith('local_attendance_')) {
+                    await prefs.remove(key);
+                  }
+                }
                 Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (c) => LoginScreen()), (r) => false);
               },
               child: const Text("خروج", style: TextStyle(color: Colors.white, fontFamily: 'Almarai')),

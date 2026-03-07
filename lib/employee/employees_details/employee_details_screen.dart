@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+
 class EmployeeDetailsScreen extends StatefulWidget {
   final int empId;
   final String empName;
 
   EmployeeDetailsScreen({super.key, required this.empId, required this.empName});
+
   @override
   _EmployeeDetailsScreenState createState() => _EmployeeDetailsScreenState();
 }
@@ -28,22 +30,32 @@ class _EmployeeDetailsScreenState extends State<EmployeeDetailsScreen> {
   Future<void> _fetchDetails() async {
     try {
       final response = await http.get(
-        Uri.parse('https://nour-al-eman.runasp.net/api/Employee/GetById?id=${widget.empId}'),
+        Uri.parse('https://nourelman.runasp.net/api/Employee/GetById?id=${widget.empId}'),
       );
+
+      // ✅ تأكد إن الـ widget لسه موجود قبل setState
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         setState(() {
           _empData = jsonDecode(response.body)['data'];
           _isLoading = false;
         });
+      } else {
+        setState(() => _isLoading = false);
       }
     } catch (e) {
+      // ✅ تأكد إن الـ widget لسه موجود قبل setState
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) return const Center(child: CircularProgressIndicator(color: Color(0xFF1976D2)));
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF1976D2)));
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -76,7 +88,11 @@ class _EmployeeDetailsScreenState extends State<EmployeeDetailsScreen> {
     );
   }
 
-  Widget _buildInfoItem(String label, String value) {
+  Widget _buildInfoItem(String label, dynamic value) {
+    // التأكد من أن القيمة ليست null وتحويلها لنص
+    String displayValue = (value == null || value.toString() == "null" || value.toString().isEmpty)
+        ? "---"
+        : value.toString();
     return Padding(
       padding: const EdgeInsets.only(bottom: 20),
       child: Column(

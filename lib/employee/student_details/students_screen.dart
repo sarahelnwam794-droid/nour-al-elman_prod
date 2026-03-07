@@ -23,6 +23,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
     _fetchStudentsData();
   }
 
+  // بتتحدث تلقائياً كل ما ترجعي لشاشة الطلاب
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && route.isCurrent) {
+      _fetchStudentsData();
+    }
+  }
+
 
   Future<void> _fetchStudentsData() async {
     setState(() => _isLoading = true);
@@ -30,7 +40,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       final prefs = await SharedPreferences.getInstance();
       String? token = prefs.getString('token');
 
-      final url = Uri.parse('https://nour-al-eman.runasp.net/api/Student/GetByStatus?status=true');
+      final url = Uri.parse('https://nourelman.runasp.net/api/Student/GetByStatus?status=true');
 
       final response = await http.get(
         url,
@@ -59,7 +69,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       final prefs = await SharedPreferences.getInstance();
       String? token = prefs.getString('token');
 
-      final url = Uri.parse('https://nour-al-eman.runasp.net/api/Student/ResetPassword');
+      final url = Uri.parse('https://nourelman.runasp.net/api/Student/ResetPassword');
 
       final response = await http.post(
         url,
@@ -89,7 +99,7 @@ class _StudentsScreenState extends State<StudentsScreen> {
       String? token = prefs.getString('token');
 
 
-      final url = Uri.parse('https://nour-al-eman.runasp.net/api/Account/DeActivate?id=$studentId&type=0');
+      final url = Uri.parse('https://nourelman.runasp.net/api/Account/DeActivate?id=$studentId&type=0');
 
       final response = await http.post(
         url,
@@ -297,80 +307,85 @@ class _StudentsScreenState extends State<StudentsScreen> {
         ),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator(color: Color(0xFFC66422)))
-            : _filteredStudents.isEmpty
-            ? const Center(child: Text("لا يوجد نتائج مطابقة"))
-            : SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4))
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Table(
-                  columnWidths: const {
-                    0: FlexColumnWidth(1),
-                    1: FlexColumnWidth(4),
-                    2: FlexColumnWidth(2),
-                    3: FlexColumnWidth(2),
-                    4: FlexColumnWidth(1.5),
-                  },
-                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                  children: [
-                    TableRow(
-                      decoration: BoxDecoration(color: Colors.grey[100]),
-                      children: [
-                        _buildHeaderCell("#"),
-                        _buildHeaderCell("الاسم", align: TextAlign.right),
-                        _buildHeaderCell("بيانات"),
-                        _buildHeaderCell("كلمة المرور"),
-                        _buildHeaderCell("حذف"),
-                      ],
-                    ),
-                    ..._filteredStudents.asMap().entries.map((entry) {
-                      int index = entry.key;
-                      StudentModel student = entry.value;
-                      return TableRow(
-                        decoration: BoxDecoration(
-                          border: Border(
-                              bottom: BorderSide(
-                                  color: Colors.grey[200]!, width: 0.5)),
-                        ),
-                        children: [
-                          _buildDataCell("${index + 1}"),
-                          _buildDataCell(student.name ?? "---", align: TextAlign.right, isBold: true),
-
-                          _buildActionCell(Icons.person_outline, Colors.blue[800]!, () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => StudentDetailsScreen(
-                                  studentId: student.id!,
-                                  studentName: student.name!,
-                                ),
-                              ),
-                            );
-                          }),
-
-                          _buildActionCell(Icons.lock_open_rounded, Colors.blue[400]!, () {
-                            _showResetPasswordDialog(student.id!, student.name!);
-                          }),
-
-                          _buildActionCell(Icons.delete_outline, Colors.red[400]!, () {
-                            _showDeleteConfirmDialog(student.id!);
-                          }),
-                        ],
-                      );
-                    }).toList(),
+            : RefreshIndicator(
+          color: const Color(0xFFC66422),
+          onRefresh: _fetchStudentsData,
+          child: _filteredStudents.isEmpty
+              ? const Center(child: Text("لا يوجد نتائج مطابقة"))
+              : SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4))
                   ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Table(
+                    columnWidths: const {
+                      0: FlexColumnWidth(1),
+                      1: FlexColumnWidth(4),
+                      2: FlexColumnWidth(2),
+                      3: FlexColumnWidth(2),
+                      4: FlexColumnWidth(1.5),
+                    },
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    children: [
+                      TableRow(
+                        decoration: BoxDecoration(color: Colors.grey[100]),
+                        children: [
+                          _buildHeaderCell("#"),
+                          _buildHeaderCell("الاسم", align: TextAlign.right),
+                          _buildHeaderCell("بيانات"),
+                          _buildHeaderCell("كلمة المرور"),
+                          _buildHeaderCell("حذف"),
+                        ],
+                      ),
+                      ..._filteredStudents.asMap().entries.map((entry) {
+                        int index = entry.key;
+                        StudentModel student = entry.value;
+                        return TableRow(
+                          decoration: BoxDecoration(
+                            border: Border(
+                                bottom: BorderSide(
+                                    color: Colors.grey[200]!, width: 0.5)),
+                          ),
+                          children: [
+                            _buildDataCell("${index + 1}"),
+                            _buildDataCell(student.name ?? "---", align: TextAlign.right, isBold: true),
+
+                            _buildActionCell(Icons.person_outline, Colors.blue[800]!, () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => StudentDetailsScreen(
+                                    studentId: student.id!,
+                                    studentName: student.name!,
+                                  ),
+                                ),
+                              );
+                            }),
+
+                            _buildActionCell(Icons.lock_open_rounded, Colors.blue[400]!, () {
+                              _showResetPasswordDialog(student.id!, student.name!);
+                            }),
+
+                            _buildActionCell(Icons.delete_outline, Colors.red[400]!, () {
+                              _showDeleteConfirmDialog(student.id!);
+                            }),
+                          ],
+                        );
+                      }).toList(),
+                    ],
+                  ),
                 ),
               ),
             ),
