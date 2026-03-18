@@ -10,7 +10,7 @@ class StudentCoursesScreen extends StatefulWidget {
   @override
   State<StudentCoursesScreen> createState() => _StudentCoursesScreenState();
 }
-
+/////////////////////////////////////
 class _StudentCoursesScreenState extends State<StudentCoursesScreen> {
   final Color kPrimaryOrange = const Color(0xFFD36B2B);
   final Color kDarkBlue = const Color(0xFF2E3542);
